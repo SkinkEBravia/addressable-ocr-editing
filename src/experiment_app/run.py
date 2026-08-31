@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -134,58 +136,109 @@ def _safe_id(sample_id: str) -> str:
     return _SAFE_ID.sub("_", sample_id)
 
 
+def _run_one(
+    sample: Sample, arm_name: str, arm_fn: Arm, client: LLMClient, out_dir: Path
+) -> SampleArmRecord:
+    """执行单个 (sample, arm)；raw json 已存在则跳过执行直接读取（断点续跑）。"""
+    raw_path = out_dir / "raw" / _safe_id(sample.sample_id) / f"{arm_name}.json"
+
+    if raw_path.exists():
+        saved = json.loads(raw_path.read_text(encoding="utf-8"))
+        return SampleArmRecord(
+            sample_id=sample.sample_id,
+            track=sample.track,
+            language=sample.language,
+            source_subset=sample.source_subset,
+            arm=arm_name,
+            corrected_text=saved["corrected_text"],
+            tokens_in=saved["tokens_in"],
+            tokens_out=saved["tokens_out"],
+            tokens_total=saved["tokens_in"] + saved["tokens_out"],
+            rounds=saved["rounds"],
+            failed=saved["failed"],
+        )
+
+    workdir = out_dir / "sessions" / _safe_id(sample.sample_id) / arm_name
+    workdir.mkdir(parents=True, exist_ok=True)
+    result = arm_fn(sample, client, workdir)
+
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text(
+        json.dumps(
+            {
+                "sample_id": sample.sample_id,
+                "arm": arm_name,
+                "rounds": result.rounds,
+                "failed": result.failed,
+                "corrected_text": result.corrected_text,
+                "tokens_in": result.tokens_in,
+                "tokens_out": result.tokens_out,
+                "raw": list(result.raw),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    return SampleArmRecord(
+        sample_id=sample.sample_id,
+        track=sample.track,
+        language=sample.language,
+        source_subset=sample.source_subset,
+        arm=arm_name,
+        corrected_text=result.corrected_text,
+        tokens_in=result.tokens_in,
+        tokens_out=result.tokens_out,
+        tokens_total=result.tokens_in + result.tokens_out,
+        rounds=result.rounds,
+        failed=result.failed,
+    )
+
+
 def run_experiment(
     samples: tuple[Sample, ...],
     arms: dict[str, Arm],
     client: LLMClient,
     out_dir: Path,
+    workers: int = 8,
 ) -> RunRecord:
-    """逐样本 × 逐臂执行，落盘原始记录与汇总 jsonl，返回 RunRecord。"""
+    """逐样本 × 逐臂并发执行，落盘原始记录与汇总 jsonl，返回 RunRecord。
+
+    - ``workers`` 控制并发度（API 可并发）；每个 (sample, arm) 有独立
+      workdir 与 raw 文件，天然线程安全。
+    - 断点续跑：raw json 已存在的 (sample, arm) 跳过执行，直接读汇总字段。
+    """
     out_dir = Path(out_dir)
-    raw_root = out_dir / "raw"
-    sessions_root = out_dir / "sessions"
-
-    records: list[SampleArmRecord] = []
-    for sample in samples:
-        for arm_name, arm_fn in arms.items():
-            workdir = sessions_root / _safe_id(sample.sample_id) / arm_name
-            workdir.mkdir(parents=True, exist_ok=True)
-            result = arm_fn(sample, client, workdir)
-
-            raw_path = raw_root / _safe_id(sample.sample_id) / f"{arm_name}.json"
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            raw_path.write_text(
-                json.dumps(
-                    {
-                        "sample_id": sample.sample_id,
-                        "arm": arm_name,
-                        "rounds": result.rounds,
-                        "failed": result.failed,
-                        "raw": list(result.raw),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-
-            records.append(
-                SampleArmRecord(
-                    sample_id=sample.sample_id,
-                    track=sample.track,
-                    language=sample.language,
-                    source_subset=sample.source_subset,
-                    arm=arm_name,
-                    corrected_text=result.corrected_text,
-                    tokens_in=result.tokens_in,
-                    tokens_out=result.tokens_out,
-                    tokens_total=result.tokens_in + result.tokens_out,
-                    rounds=result.rounds,
-                    failed=result.failed,
-                )
-            )
-
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    tasks = [(s, name, fn) for s in samples for name, fn in arms.items()]
+    done: dict[tuple[str, str], SampleArmRecord] = {}
+    total = len(tasks)
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {
+            pool.submit(_run_one, s, name, fn, client, out_dir): (s.sample_id, name)
+            for s, name, fn in tasks
+        }
+        for future in as_completed(futures):
+            record = future.result()
+            done[(record.sample_id, record.arm)] = record
+            completed += 1
+            print(
+                f"[{completed}/{total}] {record.sample_id} {record.arm} "
+                f"tokens={record.tokens_total} failed={record.failed}",
+                file=sys.stderr,
+            )
+
+    # 汇总按 (样本序 × 臂序) 确定性排序，保证复现
+    order = {
+        (s.sample_id, name): i
+        for i, (s, name, _) in enumerate(tasks)
+    }
+    records = sorted(done.values(), key=lambda r: order[(r.sample_id, r.arm)])
+
     with (out_dir / "results.jsonl").open("w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
@@ -215,6 +268,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     parser.add_argument("--out", required=True, metavar="DIR")
     parser.add_argument("--model", default="fake", help="模型名；fake = 离线确定性假客户端")
+    parser.add_argument(
+        "--workers", type=int, default=8, metavar="N", help="并发度（默认 8）"
+    )
     return parser.parse_args(argv)
 
 
@@ -240,7 +296,9 @@ def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None 
     factory = client_factory or default_client_factory
     client = factory(args.model)
 
-    run_record = run_experiment(tuple(samples), selected, client, Path(args.out))
+    run_record = run_experiment(
+        tuple(samples), selected, client, Path(args.out), workers=args.workers
+    )
 
     from experiment_app.report import build_report, render_markdown
 
