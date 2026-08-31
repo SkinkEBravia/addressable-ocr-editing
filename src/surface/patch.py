@@ -43,6 +43,7 @@ from surface.ops import (
     Merge,
     Move,
     Remove,
+    Replace,
     SetAttrs,
     SetContent,
     SurfaceOp,
@@ -165,7 +166,7 @@ def _plan(
     cursor = key_cursor
     for sop in surface_ops:
         match sop:
-            case SetContent(id=agent_id) | SetAttrs(id=agent_id):
+            case SetContent(id=agent_id) | SetAttrs(id=agent_id) | Replace(id=agent_id):
                 plan.append((STATUS_UPDATED, old_ref_map.key_of(agent_id)))
             case Append():
                 plan.append((STATUS_APPENDED, f"b{cursor}"))

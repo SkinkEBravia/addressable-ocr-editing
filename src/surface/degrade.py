@@ -6,16 +6,18 @@
 - ``AgentBlockId`` 经 ``ReferenceMap`` 换回 ``BlockKey``；``HEAD`` 直接映射
   为 ``ir.HEAD``（不经 ref_map，且仅在 anchor 位置合法）。
 - 包装语义展开：``move = Remove + Append``（新身份）；``merge =
-  SetContent(a.content + b.content) + Remove(b)``。
+  SetContent(a.content + b.content) + Remove(b)``；``replace =
+  SetContent(k, content.replace(old, new))``（``old`` 未出现则降解失败，
+  原因码 ``PATTERN_NOT_FOUND``）。
 - ``CoreOpEntry = (Op, Origin)``；``Origin`` 指回产生它的 SurfaceOp
   （序号 + 文本位置），是报错包装的前提。
-- 未知 ``AgentBlockId`` 直接产出 ``SurfaceError``（stage="degrade"），
+- 未知 ``AgentBlockId`` 等直接产出 ``SurfaceError``（stage="degrade"），
   不进入 apply。
 
 与 07 文档签名的一处补充：降解需要读取 patch 前快照的块内容（move 的
-draft、merge 的 a.content + b.content），因此签名带第三个参数
-``snapshot``。move / merge 读取的是 **patch 之前** 快照的内容——降解是
-静态展开，不感知同批次内前面的 set_content 等修改。
+draft、merge 的 a.content + b.content、replace 的 content），因此签名带
+第三个参数 ``snapshot``。move / merge / replace 读取的都是 **patch 之前**
+快照的内容——降解是静态展开，不感知同批次内前面的 set_content 等修改。
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import ir
 from ir import Block, DocumentSnapshot, Op
 from view import ReferenceMap
 
-from surface.errors import STAGE_DEGRADE, SurfaceError
+from surface.errors import PATTERN_NOT_FOUND, STAGE_DEGRADE, SurfaceError
 from surface.ops import (
     HEAD_ID,
     Append,
@@ -34,6 +36,7 @@ from surface.ops import (
     Merge,
     Move,
     Remove,
+    Replace,
     SetAttrs,
     SetContent,
     SurfaceOp,
@@ -170,6 +173,22 @@ def degrade(
                     ir.SetContent(key=key_a, content=block_a.content + block_b.content),
                     ir.Remove(key=key_b),
                 ]
+            case Replace(id=agent_id, old=old, new=new):
+                key = _target_key(agent_id, ref_map, index, position)
+                block = _block(by_key, key, index, position)
+                if old not in block.content:
+                    raise SurfaceError(
+                        stage=STAGE_DEGRADE,
+                        surface_index=index,
+                        position=position,
+                        expanded=(),
+                        cause=PATTERN_NOT_FOUND,
+                        message=(
+                            f"replace: pattern {old!r} not found in block "
+                            f"{agent_id!r} (stale view? re-render before patching)"
+                        ),
+                    )
+                core = [ir.SetContent(key=key, content=block.content.replace(old, new))]
             case _:
                 raise TypeError(f"not a SurfaceOp: {sop!r}")
         entries.extend(

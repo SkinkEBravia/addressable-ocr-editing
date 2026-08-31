@@ -14,7 +14,7 @@ Agent 接口是库内调用，CLI 是同一操作面的进程化封装——**CL
 
 ## SurfaceOp 标准集
 
-surface 层固定提供六个操作：四个核心 op 的直译 + 两个包装。
+surface 层固定提供七个操作：四个核心 op 的直译 + 三个包装。
 
 | SurfaceOp | 语义 | 降解 |
 |---|---|---|
@@ -24,6 +24,13 @@ surface 层固定提供六个操作：四个核心 op 的直译 + 两个包装�
 | `remove(id)` | 移除块 | `Remove(key)` |
 | `move(id, anchor)` | 移动到 anchor 之后 | `Remove` + `Append`，**身份变更新 key** |
 | `merge(a, b)` | b 并入 a 末尾，b 移除 | `SetContent` + `Remove` |
+| `replace(id, old, new)` | 块内片段替换，`old` 的全部出现处都换成 `new` | `SetContent(key, content.replace(old, new))` |
+
+`replace` 的规则：
+
+- `old` 必须在块内容中至少出现一次，否则降解失败（`PATTERN_NOT_FOUND`），不进 `apply`。
+- 多处出现全部替换；需要只改一处时，调用方用更长的上下文使 `old` 唯一。
+- 定位由块负责（行级），变更粒度到片段——稀疏错误下避免整块重写。
 
 规则：
 
@@ -129,6 +136,7 @@ append(HEAD, "文首新块", {"kind": "intro"})
 remove(b4)
 move(b1, b5)
 merge(b1, b2)
+replace(b3, "teh", "the")
 ```
 
 语法规则：

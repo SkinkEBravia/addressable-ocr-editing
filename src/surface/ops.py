@@ -1,9 +1,9 @@
-"""surface 操作集：六个 SurfaceOp（tagged union）。
+"""surface 操作集：七个 SurfaceOp（tagged union）。
 
 对应 Docs/Design/07-agent-api.md「SurfaceOp 标准集」节。
 
-四个核心 op 的直译（SetContent / SetAttrs / Append / Remove）+ 两个包装
-（Move / Merge）。每条 op 记录其在 patch 文本中的位置（行号区间），
+四个核心 op 的直译（SetContent / SetAttrs / Append / Remove）+ 三个包装
+（Move / Merge / Replace）。每条 op 记录其在 patch 文本中的位置（行号区间），
 供报错定位。id / anchor 均为 AgentBlockId；``HEAD_ID`` 是 agent 侧的
 保留锚点（文档头部），仅在 anchor 位置合法。
 """
@@ -25,6 +25,7 @@ __all__ = [
     "Remove",
     "Move",
     "Merge",
+    "Replace",
 ]
 
 type LineSpan = tuple[int, int]
@@ -102,3 +103,18 @@ class Merge(SurfaceOp):
     position: LineSpan
     a: AgentBlockId
     b: AgentBlockId
+
+
+@dataclass(frozen=True)
+class Replace(SurfaceOp):
+    """``replace(id, old, new)``：块内片段替换，``old`` 的全部出现处换成 ``new``。
+
+    包装：``SetContent(key, content.replace(old, new))``。``old`` 必须在块
+    内容中至少出现一次，否则降解失败（``PATTERN_NOT_FOUND``）。定位由块
+    负责（行级），变更粒度到片段——稀疏错误下避免整块重写。
+    """
+
+    position: LineSpan
+    id: AgentBlockId
+    old: str
+    new: str

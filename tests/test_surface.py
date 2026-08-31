@@ -2,9 +2,10 @@
 
 对应 Docs/Design/07-agent-api.md 的验收：
 
-- 方言 fn：六种调用解析、字符串转义、attrs JSON、HEAD 锚点、注释与空行、
+- 方言 fn：七种调用解析、字符串转义、attrs JSON、HEAD 锚点、注释与空行、
   各类语法错误抛 ParseError 且行号正确。
-- 降解：双射映射、move/merge 展开序列与 origin 溯源、未知 id 抛 SurfaceError。
+- 降解：双射映射、move/merge/replace 展开序列与 origin 溯源、未知 id 与
+  replace 的 PATTERN_NOT_FOUND 抛 SurfaceError。
 - run_patch：成功路径（受影响块的 status/key/annotated 正确）、apply 失败
   时错误回溯到正确的 surface 行、失败时 store 不变。
 """
@@ -18,11 +19,13 @@ import ir
 import sourceio
 from partition import partition_chars
 from surface import (
+    PATTERN_NOT_FOUND,
     Append,
     Merge,
     Move,
     ParseError,
     Remove,
+    Replace,
     SetAttrs,
     SetContent,
     SurfaceError,
@@ -62,7 +65,7 @@ def _store_fingerprint(store: ir.Store) -> tuple[str, dict[str, str]]:
 
 
 class TestParse:
-    def test_six_operations(self) -> None:
+    def test_seven_operations(self) -> None:
         ops = parse(
             'set_content(b3, "替换后的全文")\n'
             'set_attrs(b3, {"start": 120})\n'
@@ -71,8 +74,9 @@ class TestParse:
             "remove(b4)\n"
             "move(b1, b5)\n"
             "merge(b1, b2)\n"
+            'replace(b3, "teh", "the")\n'
         )
-        assert len(ops) == 7
+        assert len(ops) == 8
         assert ops[0] == SetContent(position=(1, 1), id="b3", text="替换后的全文")
         assert ops[1] == SetAttrs(position=(2, 2), id="b3", attrs={"start": 120})
         assert ops[2] == Append(position=(3, 3), anchor="b2", text="新块内容", attrs=None)
@@ -82,6 +86,7 @@ class TestParse:
         assert ops[4] == Remove(position=(5, 5), id="b4")
         assert ops[5] == Move(position=(6, 6), id="b1", anchor="b5")
         assert ops[6] == Merge(position=(7, 7), a="b1", b="b2")
+        assert ops[7] == Replace(position=(8, 8), id="b3", old="teh", new="the")
 
     def test_string_escapes(self) -> None:
         (op,) = parse(r'set_content(b1, "a\nb\"c\\de")')
@@ -217,6 +222,28 @@ class TestDegrade:
         assert ei.value.stage == "degrade"
         assert "reserved anchor" in ei.value.message
 
+    def test_replace_expands_to_set_content(self) -> None:
+        snapshot = _snapshot()  # b1..b4 = aaaa bbbb cccc dddd
+        entries = degrade(parse('replace(b2, "bb", "BB")'), _ref_map(snapshot), snapshot)
+        assert [op for op, _ in entries] == [
+            # 多处出现全部替换；content 取自 patch 前快照
+            ir.SetContent(key="b2", content="BBBB"),
+        ]
+        assert all(o.surface_index == 0 and o.position == (1, 1) for _, o in entries)
+
+    def test_replace_pattern_not_found(self) -> None:
+        snapshot = _snapshot()
+        with pytest.raises(SurfaceError) as ei:
+            degrade(parse('remove(b1)\nreplace(b2, "zz", "Z")'), _ref_map(snapshot), snapshot)
+        exc = ei.value
+        assert exc.stage == "degrade"
+        assert exc.surface_index == 1
+        assert exc.position == (2, 2)
+        assert exc.expanded == ()
+        assert exc.cause == PATTERN_NOT_FOUND
+        assert "zz" in exc.message
+        json.dumps(exc.to_dict())
+
 
 class TestRunPatch:
     def test_set_content_success(self, tmp_path) -> None:
@@ -273,6 +300,27 @@ class TestRunPatch:
         new = ir.load(store, result.snapshot_id)
         assert [b.key for b in new.blocks] == ["b1", "b3", "b4"]
         assert new.blocks[0].content == "aaaabbbb"
+
+    def test_replace_success(self, tmp_path) -> None:
+        store, old = _store(tmp_path)
+        result = run_patch(store, 'replace(b2, "bb", "BB")', blockkey_as_is, xml_ish)
+        assert result.snapshot_id != old.id
+        (ab,) = result.affected
+        assert (ab.key, ab.agent_id, ab.status) == ("b2", "b2", "updated")
+        assert ab.annotated == xml_ish("b2", "BBBB")
+        json.dumps(result.to_dict())
+        new = ir.load(store, result.snapshot_id)
+        assert "".join(b.content for b in new.blocks) == "aaaaBBBBccccdddd"
+
+    def test_replace_pattern_not_found_leaves_store_unchanged(self, tmp_path) -> None:
+        store, _ = _store(tmp_path)
+        before = _store_fingerprint(store)
+        with pytest.raises(SurfaceError) as ei:
+            run_patch(store, 'replace(b2, "zz", "Z")', blockkey_as_is, xml_ish)
+        exc = ei.value
+        assert exc.stage == "degrade"
+        assert exc.cause == PATTERN_NOT_FOUND
+        assert _store_fingerprint(store) == before
 
     def test_remove_reports_removed(self, tmp_path) -> None:
         store, _ = _store(tmp_path)

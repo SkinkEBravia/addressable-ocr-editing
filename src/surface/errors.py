@@ -18,13 +18,16 @@ from ir import Append, Op, Remove, SetAttrs, SetContent
 
 from surface.ops import LineSpan
 
-__all__ = ["ParseError", "SurfaceError", "op_to_dict"]
+__all__ = ["ParseError", "SurfaceError", "op_to_dict", "PATTERN_NOT_FOUND"]
 
 STAGE_DEGRADE = "degrade"
 """降解阶段失败（未知 AgentBlockId 等）：不进入 apply。"""
 
 STAGE_APPLY = "apply"
 """apply 阶段失败：用 OpError.index 查 origin 回溯到 SurfaceOp。"""
+
+PATTERN_NOT_FOUND = "PATTERN_NOT_FOUND"
+"""replace 的 ``old`` 在块内容中未出现（降解失败的原因码，机器可判读）。"""
 
 
 class ParseError(Exception):
@@ -62,8 +65,10 @@ class SurfaceError(Exception):
     - ``surface_index``：失败的 SurfaceOp 在 patch 中的序号（0 起）。
     - ``position``：该 SurfaceOp 在 patch 文本中的行号区间。
     - ``expanded``：该 SurfaceOp 展开出的 core ops（降解失败时为空）。
-    - ``cause``：降解失败为 ``None``；apply 失败为 ``OpError.reason``
-      （``KEY_NOT_FOUND`` / ``BAD_ANCHOR`` 等机器可判读原因码）。
+    - ``cause``：apply 失败为 ``OpError.reason``
+      （``KEY_NOT_FOUND`` / ``BAD_ANCHOR`` 等机器可判读原因码）；降解失败
+      一般为 ``None``，``replace`` 的 ``old`` 未出现时例外：
+      ``PATTERN_NOT_FOUND``。
     """
 
     stage: str

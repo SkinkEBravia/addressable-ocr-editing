@@ -30,7 +30,9 @@ control-noop : 原样输出（不调 LLM，锚点对照）
 | 轨 | 内容 | 口径 |
 |---|---|---|
 | `track-unit` | 官方转写单元，逐单元修复 | 与官方可比 |
-| `track-doc` | 同一 `document_id` 的连续单元按序拼接为单文件（目标 ≥8k 字符，不足则整文档为止），整文件修复 | 自设场景，不与官方排名可比 |
+| `track-doc` | **impresso-nzz 原生整页**（train 中位 9528 字符，test 中位 12104；GT 完整），整页修复 | 自设场景，不与官方排名可比 |
+
+> 修订记录：原定义为"同一 `document_id` 拼接"。实测比赛数据**每文档只有一个单元**（全子集），拼接规则永不生效，故改为 nzz 原生整页。icdar2017 上的一次空转运行同时给出噪声量级：同文本同模型两遍运行，配对 output_ratio 中位从 1.04 摆动到 1.42——单元粒度的 token 比较被推理 token 噪声淹没，无结论价值。
 
 ### 集
 
@@ -67,7 +69,7 @@ noop        control-noop            control-noop
 | 臂 | 输出条款 |
 |---|---|
 | `blocr` | 原样的 JSON 条款（`document_id` + `ocr_postcorrection_output`），逐样本单元素数组；末尾的 `CORRECTIONS_CSV` 日志**保留**——它是 BLOCR 原样的 token 成本 |
-| `blocr+system` | fn patch 条款：以 `set_content` 等六个操作编辑视图中的块；patch 本身就是结构化改动清单，替代 CSV 日志 |
+| `blocr+system` | fn patch 条款：以 `set_content` / `replace` 等七个操作编辑视图中的块；patch 本身就是结构化改动清单，替代 CSV 日志 |
 
 温度等采样参数两臂一致（0.2，同 BLOCR）；逐样本单条调用，不沿用其批处理（批处理会混淆 token 归因）。
 

@@ -8,7 +8,7 @@ core op 语义见 04-ir-ops.md。
 """
 
 from surface.degrade import CoreOpEntry, Origin, degrade
-from surface.errors import ParseError, SurfaceError, op_to_dict
+from surface.errors import PATTERN_NOT_FOUND, ParseError, SurfaceError, op_to_dict
 from surface.ops import (
     HEAD_ID,
     Append,
@@ -16,6 +16,7 @@ from surface.ops import (
     Merge,
     Move,
     Remove,
+    Replace,
     SetAttrs,
     SetContent,
     SurfaceOp,
@@ -41,6 +42,7 @@ __all__ = [
     "Remove",
     "Move",
     "Merge",
+    "Replace",
     "LineSpan",
     "HEAD_ID",
     # 方言 fn
@@ -52,6 +54,7 @@ __all__ = [
     "Origin",
     "SurfaceError",
     "op_to_dict",
+    "PATTERN_NOT_FOUND",
     # run_patch 与回执
     "run_patch",
     "PatchResult",

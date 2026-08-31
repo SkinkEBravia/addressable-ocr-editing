@@ -9,6 +9,7 @@
     remove(b4)
     move(b1, b5)
     merge(b1, b2)
+    replace(b3, "teh", "the")
 
 语法规则：
 
@@ -33,6 +34,7 @@ from surface.ops import (
     Merge,
     Move,
     Remove,
+    Replace,
     SetAttrs,
     SetContent,
     SurfaceOp,
@@ -51,6 +53,7 @@ _ARITY: dict[str, tuple[int, int]] = {
     "remove": (1, 1),
     "move": (2, 2),
     "merge": (2, 2),
+    "replace": (3, 3),
 }
 
 
@@ -188,5 +191,12 @@ def _build_op(name: str, args: list[object], lineno: int) -> SurfaceOp:
                 position=position,
                 a=_id(args[0], name, lineno),
                 b=_id(args[1], name, lineno),
+            )
+        case "replace":
+            return Replace(
+                position=position,
+                id=_id(args[0], name, lineno),
+                old=_text(args[1], name, lineno),
+                new=_text(args[2], name, lineno),
             )
     raise AssertionError(f"unreachable: {name}")  # pragma: no cover

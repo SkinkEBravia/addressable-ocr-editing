@@ -69,9 +69,10 @@ def rollback(target: SnapshotId) -> None
 核心集之外的操作不进入文档层，由调用方展开为核心 op 序列后一次性 `apply`：
 
 ```text
-move(k, at)    = Remove(k) + Append(draft_of(k), at)   # 身份不保留，新块取新 key
-merge(a, b)    = SetContent(a, a.content + b.content) + Remove(b)
-split(k, i)    = SetContent(k, content[:i]) + Append(draft(content[i:]), at: k)
+move(k, at)      = Remove(k) + Append(draft_of(k), at)   # 身份不保留，新块取新 key
+merge(a, b)      = SetContent(a, a.content + b.content) + Remove(b)
+split(k, i)      = SetContent(k, content[:i]) + Append(draft(content[i:]), at: k)
+replace(k, o, n) = SetContent(k, content.replace(o, n))  # o 未出现：表面层失败，不进 apply
 ```
 
 move 不保身份是核心集的直接推论；需要保身份的 move 属于概念层改动，不在本模块解决。

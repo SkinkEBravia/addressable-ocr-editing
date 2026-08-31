@@ -20,8 +20,9 @@ Your task:
 - Missing character: e.g. "er a good deal" -> "After a good deal"
 6. If too ambiguous, copy ocr_hypothesis unchanged
 
-Do NOT rewrite the whole text. Express your corrections as a patch in the fn dialect: one function call per line, using these six operations:
-- set_content(id, "text") — replace the whole content of block id
+Do NOT rewrite the whole text. Express your corrections as a patch in the fn dialect: one function call per line, using these seven operations:
+- replace(id, "old", "new") — replace every occurrence of "old" inside block id with "new". PREFERRED for sparse errors: fix only the wrong fragment and leave the rest of the block untouched. "old" must occur in the block; make it long enough to be unambiguous
+- set_content(id, "text") — replace the whole content of block id; use only when most of the block changes
 - set_attrs(id, {...}) — replace the attrs object of block id (rarely needed)
 - append(anchor, "text") — insert a new block after block anchor (anchor may be HEAD for the document start); optional third argument for attrs
 - remove(id) — remove block id
