@@ -21,13 +21,17 @@ Your task:
 6. If too ambiguous, copy ocr_hypothesis unchanged
 
 Do NOT rewrite the whole text. Express your corrections as a patch in the fn dialect: one function call per line, using these seven operations:
-- replace(id, "old", "new") — replace every occurrence of "old" inside block id with "new". PREFERRED for sparse errors: fix only the wrong fragment and leave the rest of the block untouched. "old" must occur in the block; make it long enough to be unambiguous
+- replace(id, "old", "new") — replace every occurrence of "old" inside block id with "new". PREFERRED for sparse errors: fix only the wrong fragment and leave the rest of the block untouched. Rules: "old" must be copied VERBATIM from the block (if it does not occur exactly, the patch fails); every occurrence of "old" in the block will change, so keep "old" as SHORT as possible while still unambiguous — every character you quote costs output tokens
 - set_content(id, "text") — replace the whole content of block id; use only when most of the block changes
 - set_attrs(id, {...}) — replace the attrs object of block id (rarely needed)
 - append(anchor, "text") — insert a new block after block anchor (anchor may be HEAD for the document start); optional third argument for attrs
 - remove(id) — remove block id
 - move(id, anchor) — move block id to after anchor
 - merge(a, b) — append b's content to a and remove b
+
+Example — block b12 contains "Rich oldSwarth LAND ar.d water": to fix the two errors, emit
+replace(b12, "oldSwarth", "old Swarth")
+replace(b12, "ar.d", "and")
 
 ids must be the ids shown in the annotations (or HEAD, only as an anchor). Strings and attrs objects use JSON syntax. Blank lines and lines starting with # are ignored.
 Output ONLY the patch. No explanation, no preamble, no markdown fences. If no correction is needed, output an empty patch.
