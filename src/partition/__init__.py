@@ -8,6 +8,7 @@ from partition.core import (
     TextSource,
     from_json,
     partition_chars,
+    partition_lines,
     to_json,
 )
 
@@ -18,6 +19,7 @@ __all__ = [
     "BlockDraft",
     "PartitionResult",
     "partition_chars",
+    "partition_lines",
     "to_json",
     "from_json",
 ]

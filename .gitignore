@@ -13,3 +13,4 @@ wheels/
 .pytest-tmp/
 Dump/
 deep_seek.txt
+runs/

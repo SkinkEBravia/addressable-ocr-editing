@@ -19,6 +19,7 @@ from partition import (
     PartitionResult,
     from_json,
     partition_chars,
+    partition_lines,
     to_json,
 )
 
@@ -148,4 +149,92 @@ class TestJsonRoundTrip:
     @given(st.text(), st.integers(min_value=1, max_value=32))
     def test_property_json_roundtrip(self, text: str, size: int) -> None:
         r = partition_chars(FakeSource(text), size)
+        assert from_json(to_json(r)) == r
+
+
+class TestPartitionLines:
+    def test_lf_newlines(self) -> None:
+        r = partition_lines(FakeSource("a\nb\nc\n"))
+        assert [b.content for b in r.blocks] == ["a\n", "b\n", "c\n"]
+
+    def test_crlf_newlines(self) -> None:
+        r = partition_lines(FakeSource("a\r\nb\r\n"))
+        assert [b.content for b in r.blocks] == ["a\r\n", "b\r\n"]
+
+    def test_cr_newlines(self) -> None:
+        r = partition_lines(FakeSource("a\rb\r"))
+        assert [b.content for b in r.blocks] == ["a\r", "b\r"]
+
+    def test_mixed_newlines(self) -> None:
+        r = partition_lines(FakeSource("a\r\nb\rc\n"))
+        assert [b.content for b in r.blocks] == ["a\r\n", "b\r", "c\n"]
+
+    def test_last_line_without_newline(self) -> None:
+        r = partition_lines(FakeSource("a\nb"))
+        assert [b.content for b in r.blocks] == ["a\n", "b"]
+
+    def test_empty_text_empty_blocks(self) -> None:
+        r = partition_lines(FakeSource(""))
+        assert r.blocks == ()
+        assert concat(r) == ""
+
+    def test_empty_lines_are_blocks(self) -> None:
+        r = partition_lines(FakeSource("a\n\n\nb"))
+        assert [b.content for b in r.blocks] == ["a\n", "\n", "\n", "b"]
+
+    def test_single_line_no_newline(self) -> None:
+        r = partition_lines(FakeSource("abc"))
+        assert [b.content for b in r.blocks] == ["abc"]
+        assert r.blocks[0].attrs == {"start": 0, "line": 0}
+
+    def test_start_and_line_attrs(self) -> None:
+        text = "ab\r\nc\rde\nf"
+        r = partition_lines(FakeSource(text))
+        offset = 0
+        for n, block in enumerate(r.blocks):
+            assert block.attrs["line"] == n
+            assert block.attrs["start"] == offset
+            assert text[offset : offset + len(block.content)] == block.content
+            offset += len(block.content)
+        assert offset == len(text)
+
+    def test_doc_attrs(self) -> None:
+        r = partition_lines(FakeSource("hello\n"))
+        assert r.doc_attrs == {"partition": "lines"}
+
+    def test_json_roundtrip(self) -> None:
+        r = partition_lines(FakeSource("a\r\nb\rc\nd"))
+        assert from_json(to_json(r)) == r
+
+    def test_json_roundtrip_empty(self) -> None:
+        r = partition_lines(FakeSource(""))
+        assert from_json(to_json(r)) == r
+
+    def test_json_is_plain_json(self) -> None:
+        r = partition_lines(FakeSource("ab\ncd"))
+        payload = json.loads(to_json(r))
+        assert payload == {
+            "blocks": [
+                {"content": "ab\n", "attrs": {"start": 0, "line": 0}},
+                {"content": "cd", "attrs": {"start": 3, "line": 1}},
+            ],
+            "doc_attrs": {"partition": "lines"},
+        }
+
+    @given(st.text())
+    def test_property_strict_partition_identity(self, text: str) -> None:
+        r = partition_lines(FakeSource(text))
+        assert concat(r) == text
+        if text:
+            assert [b.attrs["line"] for b in r.blocks] == list(range(len(r.blocks)))
+            offset = 0
+            for block in r.blocks:
+                assert block.attrs["start"] == offset
+                offset += len(block.content)
+        else:
+            assert r.blocks == ()
+
+    @given(st.text())
+    def test_property_json_roundtrip(self, text: str) -> None:
+        r = partition_lines(FakeSource(text))
         assert from_json(to_json(r)) == r

@@ -16,6 +16,7 @@ __all__ = [
     "BlockDraft",
     "PartitionResult",
     "partition_chars",
+    "partition_lines",
     "to_json",
     "from_json",
 ]
@@ -69,6 +70,27 @@ def partition_chars(source: TextSource, size: int) -> PartitionResult:
         for start in range(0, len(text), size)
     )
     return PartitionResult(blocks=blocks, doc_attrs={"partition": "chars", "size": size})
+
+
+def partition_lines(source: TextSource) -> PartitionResult:
+    """参考实现：按行切分（``str.splitlines(keepends=True)`` 语义），行终止符归属其所在块。
+
+    - 每块 attrs：``{"start": <int>, "line": <int>}``，分别为起始字符偏移与 0 起的行号。
+    - doc_attrs：``{"partition": "lines"}``。
+    - 空文本 -> 空 blocks。
+    """
+    text = source.text
+    lines = text.splitlines(keepends=True)
+    starts: list[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line)
+    blocks = tuple(
+        BlockDraft(content=line, attrs={"start": start, "line": n})
+        for n, (line, start) in enumerate(zip(lines, starts, strict=True))
+    )
+    return PartitionResult(blocks=blocks, doc_attrs={"partition": "lines"})
 
 
 def to_json(result: PartitionResult) -> str:

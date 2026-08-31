@@ -77,6 +77,17 @@ def partition_chars(source: SourceText, size: int) -> PartitionResult
 - 每块 attrs：`{"start": <int>}`，即该块在全文中的起始字符偏移。
 - doc_attrs：`{"partition": "chars", "size": size}`。
 
+## 参考实现：按行切分
+
+```python
+def partition_lines(source: SourceText) -> PartitionResult
+```
+
+- 按行切分（`str.splitlines(keepends=True)` 语义），行终止符归属其所在块。
+- 每块 attrs：`{"start": <int>, "line": <int>}`，分别为起始字符偏移与 0 起的行号。
+- doc_attrs：`{"partition": "lines"}`。
+- 适用：错误按行分布的文本（如 OCR 输出），使 `set_content` 的整块替换成本最小化。
+
 ## 持久化
 
 - `PartitionResult` 全体成员均为 `str` / `JsonValue` 组合，可直接 `json.dumps` 序列化、无损还原，无需自定义编解码器。

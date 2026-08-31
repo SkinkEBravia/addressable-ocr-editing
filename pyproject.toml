@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Block-addressable document IR for agent editing"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "hipe-ocrepair-scorer",
+    "httpx>=0.28.1",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "hypothesis>=6"]
@@ -14,8 +17,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sourceio", "src/partition", "src/ir", "src/reconstruction", "src/view", "src/surface", "src/application"]
+packages = ["src/sourceio", "src/partition", "src/ir", "src/reconstruction", "src/view", "src/surface", "src/application", "src/llm", "src/experiment_app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.uv.workspace]
+members = [
+    "related_source/HIPE-OCRepair-scorer-0.9.9",
+]
+
+[tool.uv.sources]
+hipe-ocrepair-scorer = { workspace = true, editable = true }
