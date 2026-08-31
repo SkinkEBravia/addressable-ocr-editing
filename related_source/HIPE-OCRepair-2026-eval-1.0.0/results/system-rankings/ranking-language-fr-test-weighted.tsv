@@ -1,0 +1,9 @@
+rank	system	language	language_cmer	language_cmer_lo	language_cmer_hi	language_pref	language_pref_lo	language_pref_hi	n_test_sets	n_total_test_sets
+1	bnf-mistral_hipe-ocrepair-bench_v0.9_run1	fr	0.0042	0.0029	0.0058	0.93	0.87	0.975	2	2
+2	bnf-mistral_hipe-ocrepair-bench_v0.9_run3	fr	0.0068	0.0047	0.0093	0.95	0.9	0.99	2	2
+3	bnf-mistral_hipe-ocrepair-bench_v0.9_run2	fr	0.0088	0.0067	0.0111	0.835	0.735	0.92	2	2
+4	blocr_hipe-ocrepair-bench_v0.9_run1	fr	0.0096	0.0075	0.0121	0.7	0.585	0.8	2	2
+5	l3i_hipe-ocrepair-bench_v0.9_run1	fr	0.0145	0.0109	0.019	0.325	0.2	0.445	2	2
+6	baseline-no-correction_hipe-ocrepair-bench_v0.9_run1	fr	0.0176	0.0142	0.0214	0.0	0.0	0.0	2	2
+7	Zakaria-ENSIAS_hipe-ocrepair-bench_v0.9_run1	fr	0.0185	0.0113	0.0274	0.595	0.45	0.73	2	2
+8	l3i_hipe-ocrepair-bench_v0.9_run2	fr	0.019	0.0156	0.0229	-0.15	-0.26	-0.04	1	2

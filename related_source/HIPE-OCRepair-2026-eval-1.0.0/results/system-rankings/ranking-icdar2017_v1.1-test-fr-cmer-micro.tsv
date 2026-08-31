@@ -1,0 +1,8 @@
+rank	system	cmer_micro	cmer_micro_lo	cmer_micro_hi	pref_cmer_macro	pref_cmer_macro_lo	pref_cmer_macro_hi	cmer_macro	cmer_macro_lo	cmer_macro_hi	wmer_macro
+1	bnf-mistral_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run1	0.004	0.0028	0.0052	0.98	0.94	1.0	0.0039	0.0028	0.0052	0.0128
+2	blocr_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run1	0.0084	0.0065	0.0106	0.94	0.87	0.99	0.0085	0.0065	0.0107	0.0253
+3	bnf-mistral_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run2	0.0084	0.0069	0.01	0.92	0.84	0.98	0.0085	0.007	0.0102	0.0463
+4	bnf-mistral_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run3	0.0088	0.0064	0.0118	0.97	0.93	1.0	0.0086	0.0063	0.0115	0.0467
+5	Zakaria-ENSIAS_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run1	0.0137	0.0091	0.0194	0.83	0.72	0.93	0.0136	0.0092	0.0191	0.0302
+6	baseline-no-correction_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run1	0.0184	0.0152	0.022	0.0	0.0	0.0	0.0186	0.0154	0.0223	0.1061
+7	l3i_hipe-ocrepair-bench_v0.9_icdar2017_v1.1_masked-test_fr_run1	0.0199	0.0158	0.0252	-0.03	-0.14	0.08	0.0263	0.0161	0.0435	0.1093

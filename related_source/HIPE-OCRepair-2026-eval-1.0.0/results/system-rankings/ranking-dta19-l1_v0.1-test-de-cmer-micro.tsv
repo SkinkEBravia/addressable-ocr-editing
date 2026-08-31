@@ -1,0 +1,8 @@
+rank	system	cmer_micro	cmer_micro_lo	cmer_micro_hi	pref_cmer_macro	pref_cmer_macro_lo	pref_cmer_macro_hi	cmer_macro	cmer_macro_lo	cmer_macro_hi	wmer_macro
+1	bnf-mistral_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run1	0.0054	0.0041	0.0071	1.0	1.0	1.0	0.0061	0.0045	0.0079	0.0434
+2	bnf-mistral_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run2	0.0062	0.005	0.0072	1.0	1.0	1.0	0.0063	0.005	0.0077	0.0332
+3	bnf-mistral_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run3	0.0077	0.0063	0.0093	1.0	1.0	1.0	0.0087	0.0072	0.0102	0.0573
+4	blocr_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run1	0.0177	0.0153	0.0203	0.6333	0.3333	0.8667	0.0181	0.0146	0.0224	0.0952
+5	l3i_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run1	0.0223	0.0203	0.0238	0.2	0.0	0.4	0.0226	0.0208	0.0243	0.1426
+6	baseline-no-correction_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run1	0.024	0.0232	0.0248	0.0	0.0	0.0	0.0241	0.0232	0.0251	0.1643
+7	Zakaria-ENSIAS_hipe-ocrepair-bench_v0.9_dta19-l1_v0.1_masked-test_de_run1	0.025	0.0218	0.0294	0.1333	-0.2	0.4667	0.0268	0.0222	0.0327	0.0957
