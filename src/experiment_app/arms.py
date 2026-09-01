@@ -39,6 +39,9 @@ __all__ = [
     "Arm",
     "ArmResult",
     "MAX_RETRIES",
+    "try_extract",
+    "try_apply",
+    "build_store",
     "arm_noop",
     "arm_rewrite",
     "arm_patch",
@@ -80,7 +83,11 @@ def _extract_json_object(response: str) -> dict:
     return obj
 
 
-def _extract_corrected(response: str) -> str:
+def try_extract(response: str) -> str:
+    """rewrite 通道单轮 response 的确定性后处理：提取 ocr_postcorrection_output。
+
+    容忍 markdown fence / 前后噪声；失败抛 ValueError。runner 与 replay 共用。
+    """
     obj = _extract_json_object(response)
     value = obj.get("ocr_postcorrection_output")
     if not isinstance(value, str):
@@ -113,7 +120,7 @@ def _run_rewrite(
             "error": None,
         }
         try:
-            corrected = _extract_corrected(completion.text)
+            corrected = try_extract(completion.text)
         except ValueError as exc:
             entry["error"] = str(exc)
             raw.append(entry)
@@ -184,14 +191,31 @@ def _partition_source(source: SourceText, config: ArmConfig) -> partition.Partit
     return partition.partition_lines(source)
 
 
-def arm_patch(config: ArmConfig, sample: Sample, client: LLMClient, workdir: Path) -> ArmResult:
-    """patch 通道：原文 -> ingest/view -> LLM 产出 fn patch -> 写回重建。"""
+def build_store(workdir: Path, source: SourceText, config: ArmConfig) -> ir.Store:
+    """patch 通道的快照构建：SourceText -> partition -> birth -> save。runner 与 replay 共用。"""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     store = ir.Store(workdir)
-    source = SourceText(text=sample.ocr_text, encoding="utf-8", bom=b"")
     snapshot = ir.birth(source, _partition_source(source, config))
     ir.save(store, snapshot)
+    return store
+
+
+def try_apply(store: ir.Store, response: str) -> str:
+    """patch 通道单轮 response 的确定性后处理：run_patch -> reconstruct -> text。
+
+    失败抛 ParseError / SurfaceError。runner 与 replay 共用。
+    """
+    result = surface.run_patch(store, response, view.blockkey_as_is, view.xml_ish)
+    new_snapshot = ir.load(store, result.snapshot_id)
+    return reconstruction.reconstruct(new_snapshot).text
+
+
+def arm_patch(config: ArmConfig, sample: Sample, client: LLMClient, workdir: Path) -> ArmResult:
+    """patch 通道：原文 -> ingest/view -> LLM 产出 fn patch -> 写回重建。"""
+    source = SourceText(text=sample.ocr_text, encoding="utf-8", bom=b"")
+    store = build_store(workdir, source, config)
+    snapshot = ir.load(store, ir.current(store))
     agent_view = view.present(snapshot, view.blockkey_as_is, view.xml_ish)
 
     base_prompt = render_patch_prompt(
@@ -215,17 +239,13 @@ def arm_patch(config: ArmConfig, sample: Sample, client: LLMClient, workdir: Pat
             "error": None,
         }
         try:
-            result = surface.run_patch(
-                store, completion.text, view.blockkey_as_is, view.xml_ish
-            )
+            corrected = try_apply(store, completion.text)
         except (surface.ParseError, surface.SurfaceError) as exc:
             entry["error"] = _error_feedback(exc).strip()
             raw.append(entry)
             prompt = base_prompt + _error_feedback(exc)
             continue
         raw.append(entry)
-        new_snapshot = ir.load(store, result.snapshot_id)
-        corrected = reconstruction.reconstruct(new_snapshot).text
         return _result_from_raw(corrected, raw, False)
     return _result_from_raw(sample.ocr_text, raw, True)
 

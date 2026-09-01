@@ -35,6 +35,7 @@ __all__ = [
     "CHANNELS",
     "DEFAULT_ARMS_DIR",
     "load_arm_config",
+    "arm_config_from_dict",
     "build_arm",
 ]
 
@@ -140,6 +141,25 @@ _CHANNELS: dict[str, object] = {
     "patch": arm_patch,
     "rewrite_pieces": arm_rewrite_pieces,
 }
+
+
+def arm_config_from_dict(data: dict) -> ArmConfig:
+    """从 report.json 的 ``arms.<name>.config`` 字典重建 ArmConfig（replay 用）。
+
+    与 TOML 解析同一套校验口径：未知键直接 ValueError（列出合法键），
+    channel / partition 合法性同 ``load_arm_config``。字典为扁平结构
+    （partition / block_size 在顶层），缺省键取默认值。
+    """
+    allowed = tuple(ArmConfig.__dataclass_fields__)
+    unknown = sorted(set(data) - set(allowed))
+    if unknown:
+        raise ValueError(f"臂配置字典存在未知键 {unknown}（合法键：{list(allowed)}）")
+    config = ArmConfig(**{k: v for k, v in data.items() if k in allowed})
+    if config.channel not in CHANNELS:
+        raise ValueError(f"channel 必须是 {list(CHANNELS)} 之一，got {config.channel!r}")
+    if config.partition not in _PARTITIONS:
+        raise ValueError(f"partition 必须是 {list(_PARTITIONS)} 之一，got {config.partition!r}")
+    return config
 
 
 def build_arm(config: ArmConfig) -> Arm:

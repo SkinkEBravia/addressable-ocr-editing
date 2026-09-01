@@ -114,6 +114,21 @@ def load_arm_config(name: str, path: Path) -> ArmConfig  # 解析 + 校验
 def build_arm(config: ArmConfig) -> Arm                  # channel -> runner 装配
 ```
 
+## 重放（replay）
+
+每次运行把每轮原始记录（prompt / response / usage）落盘在 `runs/<name>/raw/<sample>/<arm>.json`。**当改动只涉及确定性后处理**（降解、apply、重建、JSON 提取）**而不涉及 prompt 时**，无需重新调用 LLM：
+
+```text
+python -m experiment_app --data X --track unit --out runs/<name> --replay
+```
+
+规则：
+
+- 对每个 `(sample, arm)`：从 `--data` 重建样本与快照，按磁带顺序对每轮已存 response 重跑后处理；首个成功轮即结果；token 计数沿用记录值（不重打 API）。
+- **prompt 或模型变了 ⇒ 响应本身会变，replay 无效，必须重跑**。replay 重用的是"同一盘磁带"，不是同一行为。
+- 若新代码下某轮失败而磁带没有下一轮（真实运行本会发起新的 LLM 重试），按 `failed` 回退原文——此时 replay 是真实重跑的下界，不与重跑等价，报告中注明。
+- 臂配置从 `report.json` 的 `arms.<name>.config` 读回（即当时运行的配置），不使用当前 `configs/arms/` 里的同名文件。
+
 ## 指标
 
 ### token 效率

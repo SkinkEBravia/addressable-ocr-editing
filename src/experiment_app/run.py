@@ -283,6 +283,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--workers", type=int, default=8, metavar="N", help="并发度（默认 8）"
     )
+    parser.add_argument(
+        "--replay",
+        action="store_true",
+        help="重放模式：用 out/raw 磁带重算 corrected_text 与 report，不调 LLM",
+    )
     return parser.parse_args(argv)
 
 
@@ -316,6 +321,53 @@ def load_cli_arm_configs(arms: str, arm_config_specs: list[str]) -> dict[str, Ar
     return configs
 
 
+def _main_replay(args: argparse.Namespace, samples: list[Sample]) -> int:
+    """--replay 分支：磁带重放 + 重写 results.jsonl / report.json + 变化摘要。"""
+    if args.model != "fake" or args.workers != 8:
+        print("警告：replay 模式不调 LLM，--model / --workers 被忽略", file=sys.stderr)
+
+    from experiment_app.replay import replay_experiment
+    from experiment_app.report import build_report, render_markdown
+
+    result = replay_experiment(tuple(samples), Path(args.out))
+
+    report = build_report(
+        result.run_record, model=result.model, arm_configs=result.arm_configs
+    )
+    report["replay"] = {
+        "note": "本报告由磁带重放生成，未调用 LLM；prompt/模型变化会使 replay 无效",
+        "changed": len(result.changes),
+        "lower_bound": [
+            {"sample_id": sid, "arm": arm} for sid, arm in result.lower_bound
+        ],
+        "config_warnings": list(result.config_warnings),
+    }
+    report_path = Path(args.out) / "report.json"
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 每臂变化摘要
+    for warning in result.config_warnings:
+        print(f"警告：{warning}", file=sys.stderr)
+    by_arm: dict[str, list[str]] = {}
+    for change in result.changes:
+        by_arm.setdefault(change.arm, []).append(change.sample_id)
+    for arm, sids in sorted(by_arm.items()):
+        print(f"[replay] 臂 {arm}: {len(sids)} 个样本 outcome 变化: {sids}", file=sys.stderr)
+    if not result.changes:
+        print("[replay] 所有臂 outcome 与磁带一致（幂等）", file=sys.stderr)
+    if result.lower_bound:
+        print(
+            f"[replay] 下界情形（磁带成功但重放失败，按 failed 回退原文）: {result.lower_bound}",
+            file=sys.stderr,
+        )
+
+    print(render_markdown(report))
+    print(f"\nreplay report written to {report_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None = None) -> int:
     """CLI 入口。``client_factory`` 供测试注入假 client。"""
     args = _parse_args(argv)
@@ -327,6 +379,9 @@ def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None 
         samples = samples[: args.limit]
     if not samples:
         raise SystemExit("no samples loaded")
+
+    if args.replay:
+        return _main_replay(args, samples)
 
     arm_configs = load_cli_arm_configs(args.arms, args.arm_config)
     arms = {name: build_arm(config) for name, config in arm_configs.items()}
