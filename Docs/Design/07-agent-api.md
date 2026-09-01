@@ -28,7 +28,7 @@ surface 层固定提供七个操作：四个核心 op 的直译 + 三个包装�
 
 `replace` 的规则：
 
-- `old` 必须在块内容中至少出现一次，否则降解失败（`PATTERN_NOT_FOUND`），不进 `apply`。
+- `old` 必须在块的批次内累计内容（含同批次前序操作的结果，见「规则」）中至少出现一次，否则降解失败（`PATTERN_NOT_FOUND`），不进 `apply`。
 - 多处出现全部替换；需要只改一处时，调用方用更长的上下文使 `old` 唯一。
 - 定位由块负责（行级），变更粒度到片段——稀疏错误下避免整块重写。
 
@@ -53,11 +53,12 @@ def parse(patch_text: str) -> tuple[SurfaceOp, ...]
 ### 降解
 
 ```python
-def degrade(surface_ops: tuple[SurfaceOp, ...], ref_map: ReferenceMap) -> tuple[CoreOpEntry, ...]
+def degrade(surface_ops: tuple[SurfaceOp, ...], ref_map: ReferenceMap, snapshot: DocumentSnapshot) -> tuple[CoreOpEntry, ...]
 ```
 
 - `AgentBlockId` 经 `ReferenceMap` 换回 `BlockKey`。
 - 包装语义按上表展开为核心 op 序列。
+- `snapshot` 为 patch 前快照：move / merge / replace 的展开需要读取块内容，并按「内容操作链式叠加」规则读取批次内累计内容。
 - `CoreOpEntry = (Op, origin)`：`origin` 指回产生它的 `SurfaceOp`（序号 + 文本位置）。**溯源信息是报错包装的前提**。
 
 ### 错误回传
@@ -73,12 +74,14 @@ OpError(index, op, reason)                     # IR 层：批次内哪条 core o
 | 层 | 类型 | 字段 |
 |---|---|---|
 | IR | `OpError` | 见 04 |
-| 操作面 | `SurfaceError` | `surface_index`、`position`（行号区间）、`expanded`（展开出的 core ops）、`cause: OpError` |
+| 操作面 | `SurfaceError` | `stage`、`surface_index`、`position`（行号区间）、`expanded`（展开出的 core ops）、`cause: str \| None`、`message` |
 | 输出 | 文本 / JSON | 由方言或 CLI 格式化 |
+
+`cause` 是机器可判读的原因码：`apply` 失败时为 `OpError.reason`（`KEY_NOT_FOUND` 等）；降解失败时一般为 `None`，`replace` 的 `old` 未出现时为 `PATTERN_NOT_FOUND`。
 
 行为规则：
 
-- 降解阶段失败（未知 `AgentBlockId`）直接产出 `SurfaceError`，不进入 `apply`。
+- 降解阶段失败（未知 `AgentBlockId`、`replace` 的 `old` 未出现等）直接产出 `SurfaceError`，不进入 `apply`。
 - `apply` 失败时，用 `OpError.index` 查 `origin` 回溯到 `SurfaceOp`。
 - 预检免费：`apply` 纯函数，先试跑拿错误，成功才提交 store。
 
@@ -89,7 +92,7 @@ OpError(index, op, reason)                     # IR 层：批次内哪条 core o
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `snapshot_id` | `SnapshotId` | 新快照 |
-| `affected` | `list[AffectedBlock]` | 受影响的块，按文档序 |
+| `affected` | `list[AffectedBlock]` | 受影响的块，按文档序；同一块被多条 op 命中只出现一次（位置取首次出现，`status` 取最后一次） |
 
 `AffectedBlock`：
 
@@ -161,7 +164,7 @@ CLI 是方言的真实使用环境，方言设计服从以下约束：
 ```python
 # Agent 接口（库内）
 def run_patch(store, patch_text: str, strategy: AgentIdStrategy, annotator: Annotator) -> PatchResult
-# 失败返回 {"error": SurfaceError}
+# 失败抛 ParseError / SurfaceError（均带 to_dict()；CLI 凭异常类型映射退出码）
 ```
 
 ```text

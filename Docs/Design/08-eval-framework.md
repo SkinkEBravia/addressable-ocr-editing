@@ -95,7 +95,7 @@ block_size  = 400             # partition == "chars" 时的块大小
 - CLI 解析：`--arms a,b` 把名字解析为 `configs/arms/<name>.toml`；`--arm-config <标签>=<路径>` 可重复，用自定义标签挂任意 TOML——**同一通道的两个提示词变体可在一次实验里配对比较**（如 `sys_v1` / `sys_v2`）。
 - `--model` 是运行级参数（全臂同模型，公平性）；`retries` / `temperature` 跨臂可配，但与对手臂不一致即破坏公平性控制，报告须注明。
 - 变体比较（同通道不同 prompt）不受「指令体逐字相同」约束，但报告标签必须区分。
-- 每个臂解析后的完整配置写入 `report.json`（`arms.<name>.config`），结果可复现、可审计。
+- 每个臂解析后的完整配置写入 `report.json`（`arms.<name>.config`，并随每个臂的结果行重复落盘），结果可复现、可审计。
 
 ### 接口
 
@@ -109,9 +109,11 @@ class ArmConfig:
     temperature: float = 0.2
     partition: str = "lines"   # patch 通道
     block_size: int = 400      # patch 通道
+    prompt_base_dir: str = ""  # prompt 路径型引用的解析基准（TOML 所在目录；包内模板名时为空）
 
-def load_arm_config(name: str, path: Path) -> ArmConfig  # 解析 + 校验
-def build_arm(config: ArmConfig) -> Arm                  # channel -> runner 装配
+def load_arm_config(name: str, path: Path) -> ArmConfig    # 解析 + 校验
+def arm_config_from_dict(name: str, d: dict) -> ArmConfig  # 从 report.json 的配置字典重建（replay 用）
+def build_arm(config: ArmConfig) -> Arm                    # channel -> runner 装配
 ```
 
 ## 重放（replay）
@@ -127,7 +129,9 @@ python -m experiment_app --data X --track unit --out runs/<name> --replay
 - 对每个 `(sample, arm)`：从 `--data` 重建样本与快照，按磁带顺序对每轮已存 response 重跑后处理；首个成功轮即结果；token 计数沿用记录值（不重打 API）。
 - **prompt 或模型变了 ⇒ 响应本身会变，replay 无效，必须重跑**。replay 重用的是"同一盘磁带"，不是同一行为。
 - 若新代码下某轮失败而磁带没有下一轮（真实运行本会发起新的 LLM 重试），按 `failed` 回退原文——此时 replay 是真实重跑的下界，不与重跑等价，报告中注明。
-- 臂配置从 `report.json` 的 `arms.<name>.config` 读回（即当时运行的配置），不使用当前 `configs/arms/` 里的同名文件。
+- 臂配置从 `report.json` 的 `arms.<name>.config` 读回（即当时运行的配置），不使用当前 `configs/arms/` 里的同名文件；旧版 report（无 `arms` 键，TOML 系统之前的运行）回退到 `configs/arms/<name>.toml` 并在 `replay.config_warnings` 注明。
+- replay 的臂集合由磁带与旧 report 决定；`--arms` / `--arm-config` / `--model` / `--workers` 在 replay 模式下不生效。
+- replay 结果写入 `report.json` 的 `replay` 段（`changed` / `lower_bound` / `config_warnings`）；raw 磁带本身不动。
 
 ## 指标
 

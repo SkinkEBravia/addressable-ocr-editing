@@ -72,8 +72,10 @@ def rollback(target: SnapshotId) -> None
 move(k, at)      = Remove(k) + Append(draft_of(k), at)   # 身份不保留，新块取新 key
 merge(a, b)      = SetContent(a, a.content + b.content) + Remove(b)
 split(k, i)      = SetContent(k, content[:i]) + Append(draft(content[i:]), at: k)
-replace(k, o, n) = SetContent(k, content.replace(o, n))  # o 未出现：表面层失败，不进 apply
+replace(k, o, n) = SetContent(k, content.replace(o, n))  # o 未出现：表面层 PATTERN_NOT_FOUND，不进 apply
 ```
+
+公式中的 `content` / `draft_of(k)` 指**批次内累计内容**（初始为 patch 前快照内容）：同一 patch 内对同一块的内容操作按文本顺序叠加，后续操作看到前面的结果；`set_content` 是绝对重置。块身份与结构始终以 patch 前快照为准。每条内容操作各自展开出一条携带当时累计内容的 `SetContent`，`apply` 按序执行后净效果即全部修改的叠加。
 
 move 不保身份是核心集的直接推论；需要保身份的 move 属于概念层改动，不在本模块解决。
 
