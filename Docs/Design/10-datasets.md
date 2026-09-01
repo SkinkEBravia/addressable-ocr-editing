@@ -44,7 +44,7 @@ def info() -> DatasetInfo: ...
 
 "1 个文档还是多个"收编进 `tasks()` 参数，**调用方（实验装配、unit 测试、doc 测试）只改入口参数，不触碰文件**：
 
-- `granularity`：任务粒度。取值集与口径由各数据集自定，必须写入 `info().notes`（如 HIPE：`unit` 与官方可比，`doc` 整页为自设口径）。
+- `granularity`：任务粒度。取值集与口径由各数据集自定，必须写入 `info().notes`（如 HIPE：`chunk` 与官方可比，`doc` 整页为自设口径）。
 - `ids` / `languages` / `limit`：子集选择；同一实验内对各工具配置一致（公平性，见 11）。
 
 ### `Scorer`

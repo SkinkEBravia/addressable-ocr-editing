@@ -4,10 +4,14 @@
 jsonl 目录树）完全隔离在本文件内部；OCR 与 gold 在官方记录内分字段存放。
 
 - split: train / dev / test / masked-test（masked 的 reference=None，不出数）。
-- granularity: unit（逐转写单元，与官方可比）| doc（同 document_id 拼接，
-  自设口径，不与官方排名可比）。
+- granularity: chunk（逐转写单元，与官方可比）| doc（同 document_id 拼接，
+  自设口径，不与官方排名可比）。doc 的得分 = chunk 均值 + 方差（复用逐条
+  评分方法，见 scorer）。
 - scorer: 官方归一化（hipe_ocrepair_scorer.norm）+ jiwer 字符对齐 +
   官方 MER 公式的逐条 cMER；聚合口径（fold/bootstrap CI）由 score_all 给出。
+  doc 粒度按 DOC_SEPARATOR 把 prediction 拆回 chunk 与 gold 逐块对齐
+  （单 chunk 直接评；多 chunk 分隔符结构对不上则回退整篇口径，
+  chunks_aligned=0 标记）。
 - default_instruction: BLOCR SYSTEM_PROMPT 的指令体逐字副本（instruction.md）。
 """
 
@@ -30,7 +34,7 @@ DOC_SEPARATOR = "\n"
 __all__ = ["tasks", "scorer", "score_all", "default_instruction", "info"]
 
 _SPLITS = ("train", "dev", "test", "masked-test")
-_GRANULARITIES = ("unit", "doc")
+_GRANULARITIES = ("chunk", "doc")
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +62,7 @@ def _meta_of(row: dict) -> dict[str, Any]:
     return dict(row.get("document_metadata") or {})
 
 
-def _row_to_unit_task(path: Path, lineno: int, row: dict, masked: bool) -> Task:
+def _row_to_chunk_task(path: Path, lineno: int, row: dict, masked: bool) -> Task:
     meta = _meta_of(row)
     document_id = str(meta.get("document_id", f"row{lineno}"))
     meta = {**meta, "source_file": path.name, "row": lineno}
@@ -83,7 +87,8 @@ def _group_to_doc_task(path: Path, group: list[tuple[int, dict]], masked: bool) 
     meta = {
         **meta,
         "source_file": path.name,
-        "unit_boundaries": boundaries,  # 供 rewrite_pieces 切回单元
+        "unit_boundaries": boundaries,  # OCR 侧各单元起始偏移（供 rewrite_pieces 切回）
+        "gold_units": gold_units,  # gold 侧逐单元（供 doc 评分拆回 chunk）
     }
     return Task(
         task_id=document_id,
@@ -104,9 +109,9 @@ def _load_file(
             for ln, r in rows
             if (r.get("ground_truth") or {}).get("transcription_unit")
         ]
-    if granularity == "unit":
+    if granularity == "chunk":
         for lineno, row in rows:
-            yield _row_to_unit_task(path, lineno, row, masked)
+            yield _row_to_chunk_task(path, lineno, row, masked)
         return
     # doc：连续相同 document_id 的行按文件内顺序拼接
     group: list[tuple[int, dict]] = []
@@ -143,7 +148,7 @@ def tasks(
 ) -> list[Task]:
     if split not in _SPLITS:
         raise ValueError(f"未知 split {split!r}（{_SPLITS}）")
-    granularity = granularity or "unit"
+    granularity = granularity or "chunk"
     if granularity not in _GRANULARITIES:
         raise ValueError(f"未知 granularity {granularity!r}（{_GRANULARITIES}）")
     masked = split == "masked-test"
@@ -163,7 +168,11 @@ def tasks(
 # ---------------------------------------------------------------------------
 
 def _record(task: Task, output: str) -> dict:
-    meta = {k: v for k, v in task.meta.items() if k != "unit_boundaries"}
+    meta = {
+        k: v
+        for k, v in task.meta.items()
+        if k not in ("unit_boundaries", "gold_units")
+    }
     meta["document_id"] = task.task_id
     return {
         "document_metadata": meta,
@@ -173,20 +182,60 @@ def _record(task: Task, output: str) -> dict:
     }
 
 
+def _cmer(reference: str, hypothesis: str) -> float:
+    """逐条 cMER：官方归一化 + jiwer 字符对齐 + 官方 MER 公式。"""
+    from hipe_ocrepair_scorer.ocrepair_eval import mer_from_counts, norm
+    from jiwer import process_characters
+
+    out = process_characters(norm(reference), norm(hypothesis))
+    return mer_from_counts(out.hits, out.substitutions, out.deletions, out.insertions)
+
+
 class _Scorer:
     def score(self, prediction: str, task: Task) -> dict[str, float]:
         if task.reference is None:
             raise ScoreError(f"masked task 不出数: {task.task_id}")
-        from hipe_ocrepair_scorer.ocrepair_eval import mer_from_counts, norm
-        from jiwer import process_characters
-
-        out = process_characters(norm(task.reference), norm(prediction))
-        cmer = mer_from_counts(out.hits, out.substitutions, out.deletions, out.insertions)
-        base = process_characters(norm(task.reference), norm(task.input))
-        cmer_hyp = mer_from_counts(
-            base.hits, base.substitutions, base.deletions, base.insertions
-        )
-        return {"cmer": cmer, "cmer_hyp": cmer_hyp}
+        gold_units = task.meta.get("gold_units")
+        if gold_units:  # doc 粒度：得分 = chunk 均值 + 方差（复用逐条评分）
+            if len(gold_units) == 1:
+                # 单 chunk（HIPE 数据的常态）：无需拆分，直接逐条评分
+                return {
+                    "cmer": _cmer(gold_units[0], prediction),
+                    "cmer_var": 0.0,
+                    "n_chunks": 1.0,
+                    "cmer_hyp": _cmer(gold_units[0], task.input),
+                    "chunks_aligned": 1.0,
+                }
+            pred_chunks = prediction.split(DOC_SEPARATOR)
+            if len(pred_chunks) == len(gold_units):
+                values = [
+                    _cmer(g, p) for g, p in zip(gold_units, pred_chunks)
+                ]
+                mean = sum(values) / len(values)
+                var = sum((v - mean) ** 2 for v in values) / len(values)  # 总体方差
+                hyp_values = [
+                    _cmer(g, p)
+                    for g, p in zip(gold_units, task.input.split(DOC_SEPARATOR))
+                ]
+                return {
+                    "cmer": mean,
+                    "cmer_var": var,
+                    "n_chunks": float(len(values)),
+                    "cmer_hyp": sum(hyp_values) / len(hyp_values),
+                    "chunks_aligned": 1.0,
+                }
+            # 拼接结构被改坏（分隔符数量对不上）：回退整篇口径并标记
+            return {
+                "cmer": _cmer(task.reference, prediction),
+                "cmer_var": 0.0,
+                "n_chunks": 1.0,
+                "cmer_hyp": _cmer(task.reference, task.input),
+                "chunks_aligned": 0.0,
+            }
+        return {
+            "cmer": _cmer(task.reference, prediction),
+            "cmer_hyp": _cmer(task.reference, task.input),
+        }
 
 
 def scorer() -> _Scorer:
@@ -223,8 +272,9 @@ def info() -> DatasetInfo:
         splits=_SPLITS,
         granularities=_GRANULARITIES,
         notes=(
-            "口径：unit 粒度与官方成绩可比；doc 粒度（同 document_id 拼接）为自设场景，"
-            "不与官方排名可比。评分前归一化抹除换行/标点/大小写差异，字节级保真优势"
+            "口径：chunk 粒度（逐转写单元）与官方成绩可比；doc 粒度（同 document_id "
+            "拼接）为自设场景，不与官方排名可比，doc 得分 = chunk 均值 + 方差。"
+            "评分前归一化抹除换行/标点/大小写差异，字节级保真优势"
             "不计分。no-correction 基线很强，noop 是必设锚点。masked-test 的 GT 为空，"
             "不出数。"
         ),
