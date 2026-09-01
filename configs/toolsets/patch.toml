@@ -1,0 +1,4 @@
+toolset    = "patch"
+max_turns  = 8
+partition  = "lines"
+block_size = 400

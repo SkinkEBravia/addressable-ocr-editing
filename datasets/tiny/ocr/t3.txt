@@ -1,0 +1,1 @@
+a masked sample without gold

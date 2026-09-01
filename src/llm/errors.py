@@ -1,38 +1,41 @@
-"""llm 模块的统一错误类型。
+"""llm 的错误类型。
 
-LLMError 携带可诊断字段（HTTP status、已尝试次数），
-但绝不携带 API key、Authorization 头等敏感信息。
+对应 Docs/Design/08-llm.md「错误与重试」节。
 """
 
 from __future__ import annotations
 
-__all__ = ["LLMError"]
+__all__ = ["LLMError", "ConfigError", "CredentialError"]
 
 
 class LLMError(Exception):
-    """LLM 访问失败。
+    """LLM 调用失败。
 
-    属性：
-        status:   HTTP 状态码（网络错误 / 解析失败时为 None）。
-        attempts: 已发起的请求次数（含首次，1 表示未发生重试）。
+    kind: timeout | rate_limit | server | auth | bad_response。
+    安全约束：API key 不进入异常消息。
     """
+
+    KINDS = ("timeout", "rate_limit", "server", "auth", "bad_response")
 
     def __init__(
         self,
         message: str,
         *,
+        kind: str = "bad_response",
         status: int | None = None,
-        attempts: int = 0,
+        attempts: int = 1,
     ) -> None:
-        self.message = message
+        if kind not in self.KINDS:
+            raise ValueError(f"unknown LLMError kind: {kind!r}")
+        super().__init__(message)
+        self.kind = kind
         self.status = status
         self.attempts = attempts
-        super().__init__(self._render())
 
-    def _render(self) -> str:
-        parts = [self.message]
-        if self.status is not None:
-            parts.append(f"status={self.status}")
-        if self.attempts:
-            parts.append(f"attempts={self.attempts}")
-        return "；".join(parts)
+
+class ConfigError(Exception):
+    """模型 / 工具配置错误：未知键、协议不支持的采样键、未实现的协议等。"""
+
+
+class CredentialError(Exception):
+    """凭证缺失：key_env 未设置。不发请求。"""

@@ -1,0 +1,8 @@
+# DeepSeek（OpenAI 兼容端点；见 Docs/LLM-providers.md）
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-completion"
+base_url       = "https://api.deepseek.com"
+model          = "deepseek-v4-flash"
+key_env        = "DEEPSEEK_API_KEY"
+context_window = 1048576   # 1024k（信息性，暂不使用）
+output_length  = 393216    # 384k（信息性，暂不使用）

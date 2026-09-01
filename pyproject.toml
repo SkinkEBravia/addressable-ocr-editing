@@ -17,11 +17,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sourceio", "src/partition", "src/ir", "src/reconstruction", "src/view", "src/surface", "src/application", "src/llm", "src/experiment_app"]
+packages = ["src/sourceio", "src/partition", "src/ir", "src/reconstruction", "src/view", "src/surface", "src/application", "src/llm", "src/toolsets", "src/evalkit", "src/datasetkit", "src/experiment"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--basetemp=.pytest-tmp"  # 本机 Temp 目录被锁（shit.md #10）
 
 [tool.uv.workspace]
 members = [

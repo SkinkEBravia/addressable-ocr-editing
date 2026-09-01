@@ -1,5 +1,0 @@
-# blocr：BLOCR 原样的完全重写通道
-channel     = "rewrite"
-prompt      = "blocr_rewrite"
-retries     = 2
-temperature = 0.2

@@ -1,0 +1,8 @@
+# GLM via 火山引擎（OpenAI 兼容端点；便宜，测试用——见 Docs/LLM-providers.md）
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-completion"
+base_url       = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model          = "glm-5.3-flash"
+key_env        = "VOLCENGINE_API_KEY"
+context_window = 1048576   # 1024k（信息性，暂不使用）
+output_length  = 131072    # 128k（信息性，暂不使用）

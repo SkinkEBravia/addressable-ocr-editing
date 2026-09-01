@@ -1,5 +1,0 @@
-# ref-blocr@unit-pieces：逐单元重写后拼接（隔离长上下文退化）
-channel     = "rewrite_pieces"
-prompt      = "blocr_rewrite"
-retries     = 2
-temperature = 0.2

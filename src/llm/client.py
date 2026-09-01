@@ -1,37 +1,34 @@
-"""LLM 访问层协议与结果类型。
+"""LLMClient 协议与 build_client 工厂。
 
-测评装配层（experiment_app）只依赖本文件定义的 LLMClient 协议，
-不感知具体供应商实现。
+对应 Docs/Design/08-llm.md「接口」「协议适配器」节。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
-__all__ = ["Usage", "Completion", "LLMClient"]
+from llm.config import ModelConfig, resolve_api_key
+from llm.errors import ConfigError
+from llm.types import Completion, Message
 
-
-@dataclass(frozen=True)
-class Usage:
-    """单次调用的 token 计数。
-
-    契约：必须来自服务端返回的 usage 字段，不允许客户端估算。
-    """
-
-    input_tokens: int
-    output_tokens: int
-
-
-@dataclass(frozen=True)
-class Completion:
-    """单次补全的结果：文本 + 真实 token 计数。"""
-
-    text: str
-    usage: Usage
+__all__ = ["LLMClient", "build_client"]
 
 
 class LLMClient(Protocol):
-    """同步补全接口。失败时抛 llm.errors.LLMError。"""
+    """同步补全接口。无状态：对话历史由调用方持有。
 
-    def complete(self, prompt: str, *, system: str | None = None) -> Completion: ...
+    失败时抛 llm.errors.LLMError / CredentialError / ConfigError。
+    """
+
+    def complete(self, messages: list[Message]) -> Completion: ...
+
+
+def build_client(config: ModelConfig) -> LLMClient:
+    """按 protocol 分派适配器。未实现的协议报 ConfigError，不静默降级。"""
+    if config.protocol == "openai-completion":
+        from llm.adapters.openai_completion import OpenAICompletionClient
+
+        return OpenAICompletionClient(config, resolve_api_key(config))
+    raise ConfigError(
+        f"protocol {config.protocol!r} 的适配器尚未实现（v1 仅 openai-completion）"
+    )

@@ -1,2 +1,0 @@
-# control-noop：原样输出（不调 LLM），锚点对照
-channel = "noop"
