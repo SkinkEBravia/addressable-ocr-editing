@@ -242,6 +242,28 @@ def test_progress_non_tty_events():
     assert "\x1b[" not in text  # 非 TTY 无 ANSI
 
 
+def test_progress_tty_live_repaint():
+    """模拟 TTY（rich force_terminal）：Live 原地重绘，超宽行被裁剪。"""
+    import io
+
+    from experiment.progress import Progress
+    from llm import Usage
+
+    buf = io.StringIO()
+    p = Progress(stream=buf, force_terminal=True)
+    p.begin(1)
+    p.start_cell("t1 × rewrite")
+    p.delta("x" * 500 + "\n短行\n")  # 超长行由 rich 按终端宽度处理
+    p.turn(Usage(input_tokens=3, output_tokens=5))
+    p.end_cell("t1 × rewrite", "done", Usage(input_tokens=3, output_tokens=5), 2.0)
+    p.close()
+    text = buf.getvalue()
+    assert "\x1b[" in text  # Live 重绘走 ANSI 光标控制
+    assert "t1 × rewrite | turn 1" in text
+    assert "t1 × rewrite -> done" in text  # 最近事件进刷新块，不堆历史
+    assert "x" * 500 not in text  # 超宽行被裁剪/折行，不会一行打满
+
+
 def test_stub_client_streams_deltas():
     chunks: list[str] = []
     c = StubClient(["hello world"])

@@ -83,21 +83,25 @@ def main(argv: list[str] | None = None) -> int:
     client = build_client(model_config)
     from experiment.progress import Progress
 
-    summary = run_experiment(
-        dataset_dir=Path(args.dataset),
-        toolset_configs=toolset_configs,
-        client=client,
-        model_config_dict=model_config.as_dict(),
-        split=args.split,
-        granularity=args.granularity,
-        ids=_split_csv(args.ids),
-        languages=_split_csv(args.languages),
-        limit=args.limit,
-        instruction=instruction,
-        out=out,
-        workers=args.workers,
-        progress=Progress(),
-    )
+    prog = Progress()
+    try:
+        summary = run_experiment(
+            dataset_dir=Path(args.dataset),
+            toolset_configs=toolset_configs,
+            client=client,
+            model_config_dict=model_config.as_dict(),
+            split=args.split,
+            granularity=args.granularity,
+            ids=_split_csv(args.ids),
+            languages=_split_csv(args.languages),
+            limit=args.limit,
+            instruction=instruction,
+            out=out,
+            workers=args.workers,
+            progress=prog,
+        )
+    finally:
+        prog.close()  # 停掉 Live 刷新块（transient：清屏不堆历史）
     _emit_report(args, out, model_config, toolset_configs, instruction)
     counts: dict[str, int] = {}
     for status in summary.values():
