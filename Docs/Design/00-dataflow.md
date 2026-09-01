@@ -65,3 +65,7 @@ IR 重建 reconstruct(build(blocks)) == s.text
 | [05-ir-io.md](05-ir-io.md) | 出生、统一输出接口、store（CAS）与会话 |
 | [06-view.md](06-view.md) | View、AgentId 策略、标注形式 |
 | [07-agent-api.md](07-agent-api.md) | SurfaceOp 标准集、错误回传、默认组件、CLI |
+| [08-llm.md](08-llm.md) | LLM 客户端：协议适配、凭证、采样参数、对话 |
+| [09-tools.md](09-tools.md) | 工具配置、agent loop、外部 harness 驱动 |
+| [10-datasets.md](10-datasets.md) | dataset.py 契约、评测、evalkit、测试入口 |
+| [11-experiment.md](11-experiment.md) | 实验装配：执行矩阵、对话录、replay、报告 |

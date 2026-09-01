@@ -1,16 +1,16 @@
-# 外部接口：Agent 操作面与 CLI
+# 外部接口：Agent 操作面、CLI 与 MCP
 
 > 前置概念：[View 与 Agent 操作面](../Concepts/04-view.md)；报错能力：[OpError](04-ir-ops.md#operror)；视图：[06-view.md](06-view.md)
 
 ## 范围
 
-两个入口，同一条链路：
+三个入口，同一条链路：
 
 ```text
 patch 文本 --解析--> surface ops --降解--> core ops --apply--> 新快照 --渲染--> 受影响块
 ```
 
-Agent 接口是库内调用，CLI 是同一操作面的进程化封装——**CLI 的主要用户也是 Agent**，因此两者共享方言、错误格式与会话目录。
+Agent 接口是库内调用；CLI 与 MCP 服务是同一操作面的两种进程化封装——**两者的主要用户都是 Agent**，因此三者共享方言、错误格式与会话目录。
 
 ## SurfaceOp 标准集
 
@@ -159,6 +159,20 @@ CLI 是方言的真实使用环境，方言设计服从以下约束：
 3. **退出码**：`0` 成功；`1` 解析失败，`2` 降解失败，`3` apply 失败，`4` I/O 失败。
 4. **进程模型**：单发进程，启动时读 `current`，提交时写 store（见 05）。并发写不在 v1 范围，调用方串行执行。
 
+## MCP 服务
+
+MCP 是操作面给外部 Agent / harness 的第二种进程化封装。当前最简单的 MCP 部署形态是 **Streamable HTTP**：单 HTTP 端点，项目内启动一个服务进程即可，无需独立基础设施。
+
+```python
+def serve(session: Path, host: str, port: int) -> None   # 阻塞；工具面 = 操作面命令的 MCP 映射
+```
+
+规则：
+
+- MCP 工具是 SurfaceOp 操作面命令的直译（`view` / `patch` / `write` 等），错误回传沿用 `SurfaceError` 结构——**方言、错误格式、会话目录与 CLI 完全一致**，调用方换通道不换语义。
+- 服务按会话目录持有状态，与 CLI 进程可共享同一会话目录；多会话 = 多端口或多进程，v1 不做服务内多会话复用。
+- 传输细节（鉴权、TLS）不在 v1；服务只绑定 loopback，面向本机 Agent。
+
 ## 接口
 
 ```python
@@ -174,6 +188,7 @@ doc view --session <dir>                            # 打印 AgentView payload
 doc patch --session <dir> [-f json] < patch.txt     # 预检 + apply + save + 返回受影响块
 doc write --session <dir> [-o <path>]               # reconstruct + sourceio.write
 doc rollback <SnapshotId> --session <dir>           # set_current
+doc serve --session <dir> [--host 127.0.0.1] --port <p>  # MCP 服务（Streamable HTTP），见上节
 ```
 
 各命令即链路片段的装配：`ingest` = read + partition + birth + save；`patch` = load + parse + degrade + 试跑 + save + 渲染受影响块；`write` = load + reconstruct + write。
@@ -188,6 +203,6 @@ ingest → 无 patch → write 的产物与原文件逐字节相同
 
 ## 边界
 
-- 方言、id 策略、标注形式各自可替换，互不影响；CLI 与 Agent 接口只认 `SurfaceOp`，不感知方言语法。
+- 方言、id 策略、标注形式各自可替换，互不影响；CLI、MCP 与库内 Agent 接口只认 `SurfaceOp`，不感知方言语法。
 - View 的生成归 `06-view.md`；CLI 的 `view` 命令只是其调用方。
-- 并发控制、锁、网络服务不在 v1。
+- 并发控制、锁不在 v1；MCP 服务的鉴权、TLS 等传输细节不在 v1（只绑 loopback）。
