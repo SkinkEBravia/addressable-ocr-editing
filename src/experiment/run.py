@@ -5,12 +5,17 @@
 - 同一实验内所有工具配置共用同一模型配置与预算口径（公平性）。
 - resume 的键 = (task_id, toolset, config_hash)；配置变了即重跑。
 - 每轮增量落盘；LLMError 级别失败 => status=failed，回退原文。
+- workers > 1 时按 cell 并发（线程池）；并发只改变完成顺序，
+  不改变任何 cell 的语义与落盘内容。进程内共享 client：适配器每次调用
+  自建 httpx.Client，线程安全。
 """
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from datasetkit import load_dataset, select
 from llm import LLMClient, LLMError, load_env_file
@@ -21,6 +26,7 @@ from experiment.config import (
     build_toolset,
     config_hash,
 )
+from experiment.progress import NullProgress
 from experiment.transcript import TranscriptWriter
 
 __all__ = ["run_experiment", "RunSummary"]
@@ -43,13 +49,16 @@ def run_experiment(
     limit: int | None = None,
     instruction: str | None = None,
     out: Path,
-    on_progress: Callable[[str], None] | None = None,
+    workers: int = 1,
+    progress: Any = None,
 ) -> RunSummary:
     """执行矩阵。返回汇总；对话录逐轮落盘于 out/raw/。
 
     instruction 缺省用数据集的 default_instruction()。
+    workers 为并发路数（默认 1，串行）。
     """
     load_env_file()  # 项目 .env 先进进程环境（幂等）
+    progress = progress or NullProgress()
     dataset = load_dataset(dataset_dir)
     tasks = list(
         select(
@@ -72,7 +81,7 @@ def run_experiment(
         "limit": limit,
     }
 
-    summary = RunSummary()
+    cells: list[tuple[Any, ToolsetConfig, Any, str]] = []  # (task, cfg, toolset, cfg_hash)
     for cfg in toolset_configs:
         toolset = build_toolset(cfg)
         cfg_hash = config_hash(
@@ -82,42 +91,57 @@ def run_experiment(
             dataset_params,
         )
         for task in tasks:
-            key = (task.task_id, cfg.name)
-            writer = TranscriptWriter(out, task.task_id, cfg.name, cfg_hash)
-            if writer.config_hash_matches():
-                summary[str(key)] = "resumed"
-                if on_progress:
-                    on_progress(f"skip (resume): {task.task_id} × {cfg.name}")
-                continue
-            workdir = out / "work" / task.task_id / cfg.name
-            workdir.mkdir(parents=True, exist_ok=True)
+            cells.append((task, cfg, toolset, cfg_hash))
 
-            def on_turn(turn, turns, _w=writer):
-                _w.write_turn(turn, turns)
+    progress.begin(len(cells))
+    summary = RunSummary()
 
-            try:
-                result = run_toolset(
-                    client,
-                    task,
-                    toolset,
-                    cfg.budget(),
-                    instruction,
-                    workdir,
-                    on_turn=on_turn,
-                )
-            except LLMError as exc:
-                result = LoopResult(
-                    output=task.input,  # 失败回退原文
-                    status="failed",
-                    turns=(),
-                    total_usage=None,
-                )
-                if on_progress:
-                    on_progress(
-                        f"failed: {task.task_id} × {cfg.name}: {exc.kind}: {exc}"
-                    )
-            writer.finalize(result, list(result.turns))
-            summary[str(key)] = result.status
-            if on_progress:
-                on_progress(f"{result.status}: {task.task_id} × {cfg.name}")
+    def run_cell(cell: tuple[Any, ToolsetConfig, Any, str]) -> None:
+        task, cfg, toolset, cfg_hash = cell
+        label = f"{task.task_id} × {cfg.name}"
+        writer = TranscriptWriter(out, task.task_id, cfg.name, cfg_hash)
+        if writer.config_hash_matches():
+            summary[str((task.task_id, cfg.name))] = "resumed"
+            progress.end_cell(label, "resumed", None, 0.0)
+            return
+        workdir = out / "work" / task.task_id / cfg.name
+        workdir.mkdir(parents=True, exist_ok=True)
+        progress.start_cell(label)
+        t0 = time.monotonic()
+
+        def on_turn(turn, turns, _w=writer):
+            _w.write_turn(turn, turns)
+            progress.turn(turn.completion.usage)
+
+        try:
+            result = run_toolset(
+                client,
+                task,
+                toolset,
+                cfg.budget(),
+                instruction,
+                workdir,
+                on_turn=on_turn,
+                on_delta=progress.delta,
+            )
+        except LLMError as exc:
+            result = LoopResult(
+                output=task.input,  # 失败回退原文
+                status="failed",
+                turns=(),
+                total_usage=None,
+            )
+            progress.delta(f"\n[LLMError:{exc.kind}] {exc}\n")
+        writer.finalize(result, list(result.turns))
+        summary[str((task.task_id, cfg.name))] = result.status
+        progress.end_cell(
+            label, result.status, result.total_usage, time.monotonic() - t0
+        )
+
+    if workers <= 1:
+        for cell in cells:
+            run_cell(cell)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(run_cell, cells))
     return summary

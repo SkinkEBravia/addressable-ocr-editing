@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from datasetkit import load_dataset, select
-from llm import StubClient
+from llm import Message, StubClient
 from experiment import (
     build_report,
     load_toolset_config,
@@ -197,3 +197,55 @@ def test_replay_unchanged(tmp_path: Path):
     _report(out)
     result = replay(out)
     assert result["changed"] == []  # 后处理未变 => replay 结果不变
+
+
+def test_workers_concurrent_same_result(tmp_path: Path):
+    """并发是实现细节：workers=4 与串行的落盘与指标完全一致。"""
+    out = tmp_path / "par"
+    summary = run_experiment(
+        dataset_dir=TINY,
+        toolset_configs=_configs(),
+        client=StubClient([_answer] * 64),
+        model_config_dict=_MODEL,
+        split="all",
+        out=out,
+        workers=4,
+    )
+    assert set(summary.values()) <= {"done"}
+    raw = [p for p in (out / "raw").glob("*/*.json") if p.parent.name != "messages"]
+    assert len(raw) == 3 * 4
+    r_par = _report(out)["per_sample"]
+    r_seq = _report(_run(tmp_path / "seq"))["per_sample"]
+    assert r_par == r_seq
+
+
+def test_progress_non_tty_events():
+    """非 TTY（StringIO）：退化为事件行，不崩、不喷 ANSI。"""
+    import io
+
+    from experiment.progress import Progress
+
+    buf = io.StringIO()
+    p = Progress(stream=buf)
+    p.begin(2)
+    p.start_cell("t1 × noop")
+    p.delta("hello\nwor")
+    p.delta("ld\n")
+    from llm import Usage
+
+    p.turn(Usage(input_tokens=3, output_tokens=5))
+    p.end_cell("t1 × noop", "done", Usage(input_tokens=3, output_tokens=5), 1.0)
+    text = buf.getvalue()
+    assert "[start] t1 × noop" in text
+    assert "[1/2] t1 × noop -> done" in text
+    assert "5 out tok" in text and "5.0 tok/s" in text
+    assert "\x1b[" not in text  # 非 TTY 无 ANSI
+
+
+def test_stub_client_streams_deltas():
+    chunks: list[str] = []
+    c = StubClient(["hello world"])
+    out = c.complete([Message("user", "x")], on_delta=chunks.append)
+    assert "".join(chunks) == "hello world"
+    assert all(len(c_) <= 16 for c_ in chunks)  # 分块回调
+    assert out.text == "hello world"

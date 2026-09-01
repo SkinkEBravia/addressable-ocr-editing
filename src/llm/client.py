@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from llm.config import ModelConfig, resolve_api_key
@@ -17,10 +18,16 @@ __all__ = ["LLMClient", "build_client"]
 class LLMClient(Protocol):
     """同步补全接口。无状态：对话历史由调用方持有。
 
+    on_delta 非空时启用流式输出，每个文本增量回调（过程可观测）。
     失败时抛 llm.errors.LLMError / CredentialError / ConfigError。
     """
 
-    def complete(self, messages: list[Message]) -> Completion: ...
+    def complete(
+        self,
+        messages: list[Message],
+        *,
+        on_delta: "Callable[[str], None] | None" = None,
+    ) -> Completion: ...
 
 
 def build_client(config: ModelConfig) -> LLMClient:

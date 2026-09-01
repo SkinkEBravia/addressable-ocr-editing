@@ -44,6 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--instruction", default=None, help="instruction 模板路径（覆盖数据集默认）")
     p.add_argument("--out", required=True, help="输出目录 runs/<name>")
+    p.add_argument("--workers", type=int, default=1, help="并发路数（默认 1 串行）")
     p.add_argument("--replay", action="store_true", help="磁带重放后处理（不重打 API）")
     p.add_argument("--report-only", action="store_true", help="只重建报告（不重跑）")
     return p
@@ -80,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         instruction = Path(args.instruction).read_text(encoding="utf-8")
 
     client = build_client(model_config)
+    from experiment.progress import Progress
+
     summary = run_experiment(
         dataset_dir=Path(args.dataset),
         toolset_configs=toolset_configs,
@@ -92,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         limit=args.limit,
         instruction=instruction,
         out=out,
-        on_progress=progress,
+        workers=args.workers,
+        progress=Progress(),
     )
     _emit_report(args, out, model_config, toolset_configs, instruction)
     counts: dict[str, int] = {}

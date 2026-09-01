@@ -60,10 +60,17 @@ Usage = { input_tokens: int, output_tokens: int, reasoning_tokens: int | None }
 
 ```python
 class LLMClient(Protocol):
-    def complete(self, messages: list[Message]) -> Completion: ...
+    def complete(
+        self,
+        messages: list[Message],
+        on_delta: Callable[[str], None] | None = None,   # 可选观察通道
+    ) -> Completion: ...
 
 def build_client(config: ModelConfig) -> LLMClient
 ```
+
+- `on_delta` 非空 ⇒ 适配器以流式请求，逐增量回调（content 与 reasoning 增量都进回调——思考可观测）；回调**只作观察**，`Completion` 语义与非流式完全一致，usage 仍取自端点（流式经 `stream_options.include_usage` 获得）。
+- `on_delta` 为空 ⇒ 普通非流式请求。上层（loop / 实验装配）按需透传，client 本身不渲染。
 
 ## 协议适配器
 
@@ -113,4 +120,5 @@ key_env 未设置 ⇒ CredentialError，不发请求
 
 - 不定义工具、方言、终止条件（[09](09-tools.md)）；不定义执行矩阵与落盘（[11](11-experiment.md)）。
 - 不缓存响应——replay 是 11 的对话录机制，不是 client 缓存。
-- 流式输出、多模态、API 级 function calling 不在 v1（工具调用走文本方言，见 09）。
+- 流式只作观察通道（`on_delta`），不改变 `Completion` 语义与落盘内容；渲染归 [11](11-experiment.md#运行时可观测)。
+- 多模态、API 级 function calling 不在 v1（工具调用走文本方言，见 09）。

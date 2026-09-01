@@ -8,7 +8,6 @@ experiment 的冒烟（见 Docs/Design/11-experiment.md「验收」）。
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-
 from llm.types import Completion, Message, Usage
 
 __all__ = ["StubClient"]
@@ -34,7 +33,12 @@ class StubClient:
         self._script = list(script)
         self.calls: list[list[Message]] = []
 
-    def complete(self, messages: list[Message]) -> Completion:
+    def complete(
+        self,
+        messages: list[Message],
+        *,
+        on_delta: "Callable[[str], None] | None" = None,
+    ) -> Completion:
         self.calls.append(list(messages))
         if not self._script:
             raise RuntimeError("StubClient 剧本已用尽")
@@ -42,4 +46,7 @@ class StubClient:
         if isinstance(entry, Exception):
             raise entry
         text = entry(messages) if callable(entry) else entry
+        if on_delta is not None:  # 假端点也"流式"：分块回调
+            for i in range(0, len(text), 16):
+                on_delta(text[i : i + 16])
         return Completion(text=text, usage=_fake_usage(messages, text), raw={"stub": True})

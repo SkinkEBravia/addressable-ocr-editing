@@ -163,6 +163,7 @@ def run_loop(
     instruction: str,
     workdir: Path,
     on_turn: "Any | None" = None,
+    on_delta: "Any | None" = None,
 ) -> LoopResult:
     """多轮 agent loop。
 
@@ -195,7 +196,7 @@ def run_loop(
     status = "budget_exceeded"  # 正常退出路径会覆盖
 
     while len(turns) < budget.max_turns:
-        completion = client.complete(messages)  # LLMError 由调用方处理 -> failed
+        completion = client.complete(messages, on_delta=on_delta)  # LLMError 由调用方处理 -> failed
         ctx.data["last_text"] = completion.text
         messages.append(Message("assistant", completion.text))
         index = len(turns)
@@ -259,11 +260,15 @@ def run_toolset(
     instruction: str,
     workdir: Path,
     on_turn: "Any | None" = None,
+    on_delta: "Any | None" = None,
 ) -> LoopResult:
     """分派：工具集自带自定义 runner（如 rewrite_pieces）则用之，否则 run_loop。"""
     custom = getattr(toolset, "run", None)
     if callable(custom):
-        return custom(client, task, budget, instruction, workdir, on_turn=on_turn)
+        return custom(
+            client, task, budget, instruction, workdir, on_turn=on_turn, on_delta=on_delta
+        )
     return run_loop(
-        client, task.input, task.meta, toolset, budget, instruction, workdir, on_turn
+        client, task.input, task.meta, toolset, budget, instruction, workdir,
+        on_turn, on_delta,
     )

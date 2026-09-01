@@ -5,6 +5,9 @@
 - 线格式互转与 usage 提取，不改写内容。
 - 采样键缺席（None）= 不下发该参数。
 - reasoning_tokens 从 usage.completion_tokens_details.reasoning_tokens 提取。
+- 流式：传入 on_delta 时启用 stream（含 stream_options.include_usage），
+  每个增量（content 与 reasoning_content）回调给调用方——过程可观测，
+  长思考不再表现为静默挂起。
 - 传输层重试：timeout / rate_limit / server，指数退避并尊重 Retry-After；
   auth / bad_response 不重试。
 - 安全约束：API key 不打印、不进异常消息。
@@ -12,12 +15,14 @@
 
 from __future__ import annotations
 
+import json
 import time
+from collections.abc import Callable
 
 import httpx
 
 from llm.config import ModelConfig
-from llm.errors import LLMError
+from llm.errors import ConfigError, LLMError
 from llm.types import Completion, Message, Usage
 
 __all__ = ["OpenAICompletionClient"]
@@ -49,8 +54,6 @@ def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
         payload["temperature"] = config.temperature
     if config.reasoning_effort is not None:
         if config.reasoning_effort not in _REASONING_EFFORT_VALUES:
-            from llm.errors import ConfigError
-
             raise ConfigError(
                 f"reasoning_effort {config.reasoning_effort!r} 非法"
                 f"（{list(_REASONING_EFFORT_VALUES)}）"
@@ -59,9 +62,8 @@ def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
     return payload
 
 
-def _parse_usage(data: dict) -> Usage | None:
-    """从端点 usage 字段提取；端点不返回则为 None（不做本地估算）。"""
-    usage = data.get("usage")
+def _usage_from_dict(usage: object) -> Usage | None:
+    """端点 usage 字段 -> Usage；缺失/畸形为 None（不做本地估算）。"""
     if not isinstance(usage, dict):
         return None
     input_tokens = usage.get("prompt_tokens")
@@ -95,7 +97,18 @@ def _parse_completion(response: httpx.Response, *, attempts: int) -> Completion:
         ) from exc
     if not isinstance(text, str):
         raise LLMError("响应 content 不是字符串", kind="bad_response", attempts=attempts)
-    return Completion(text=text, usage=_parse_usage(data), raw=data)
+    return Completion(text=text, usage=_usage_from_dict(data.get("usage")), raw=data)
+
+
+class _Retryable(Exception):
+    """内部：可重试的传输失败（限流 / 5xx / 网络）。"""
+
+    def __init__(self, message: str, *, kind: str, status: int | None = None,
+                 retry_after: str | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+        self.retry_after = retry_after
 
 
 class OpenAICompletionClient:
@@ -115,68 +128,132 @@ class OpenAICompletionClient:
         self._api_key = api_key
         self._client = http_client
 
-    def complete(self, messages: list[Message]) -> Completion:
+    def complete(
+        self,
+        messages: list[Message],
+        *,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> Completion:
         payload = _build_payload(self._config, messages)
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
         url = f"{self._config.base_url.rstrip('/')}/chat/completions"
+        t0 = time.monotonic()
         if self._client is not None:
-            return self._request_with_retry(self._client, url, payload, headers)
-        with httpx.Client(timeout=self._config.timeout) as client:
-            return self._request_with_retry(client, url, payload, headers)
+            comp = self._request_with_retry(self._client, url, payload, headers, on_delta)
+        else:
+            with httpx.Client(timeout=self._config.timeout) as client:
+                comp = self._request_with_retry(client, url, payload, headers, on_delta)
+        return Completion(
+            text=comp.text,
+            usage=comp.usage,
+            raw=comp.raw,
+            elapsed_s=time.monotonic() - t0,
+        )
+
+    # -- 重试循环 -----------------------------------------------------------
 
     def _request_with_retry(
         self,
         client: httpx.Client,
         url: str,
         payload: dict,
-        headers: dict[str, str],
+        headers: dict,
+        on_delta: Callable[[str], None] | None,
     ) -> Completion:
         attempts = 0
         while True:
             attempts += 1
             try:
-                response = client.post(url, json=payload, headers=headers)
+                if on_delta is None:
+                    response = client.post(url, json=payload, headers=headers)
+                    self._raise_for_status(response)
+                    return _parse_completion(response, attempts=attempts)
+                return self._stream_once(client, url, payload, headers, on_delta, attempts)
             except httpx.TimeoutException as exc:
                 if attempts > self._config.max_transport_retries:
                     raise LLMError(
                         f"超时：{type(exc).__name__}", kind="timeout", attempts=attempts
                     ) from exc
                 _backoff(attempts)
-                continue
             except httpx.TransportError as exc:
                 if attempts > self._config.max_transport_retries:
                     raise LLMError(
                         f"网络错误：{type(exc).__name__}", kind="timeout", attempts=attempts
                     ) from exc
                 _backoff(attempts)
-                continue
-            status = response.status_code
-            if status == 429:
+            except _Retryable as r:
                 if attempts > self._config.max_transport_retries:
                     raise LLMError(
-                        "限流，重试耗尽", kind="rate_limit", status=status, attempts=attempts
-                    )
-                _backoff(attempts, response.headers.get("Retry-After"))
-                continue
-            if status >= 500:
-                if attempts > self._config.max_transport_retries:
-                    raise LLMError(
-                        "服务不可用，重试耗尽", kind="server", status=status, attempts=attempts
-                    )
-                _backoff(attempts, response.headers.get("Retry-After"))
-                continue
-            if status in (401, 403):
-                raise LLMError(
-                    "认证失败（不可重试）", kind="auth", status=status, attempts=attempts
-                )
-            if status != 200:
-                raise LLMError(
-                    f"请求被拒绝（HTTP {status}，不可重试）",
-                    kind="bad_response",
-                    status=status,
-                    attempts=attempts,
-                )
-            return _parse_completion(response, attempts=attempts)
+                        str(r), kind=r.kind, status=r.status, attempts=attempts
+                    ) from r
+                _backoff(attempts, r.retry_after)
+
+    def _raise_for_status(self, response: httpx.Response) -> None:
+        status = response.status_code
+        if status == 200:
+            return
+        if status == 429:
+            raise _Retryable(
+                "限流", kind="rate_limit", status=status,
+                retry_after=response.headers.get("Retry-After"),
+            )
+        if status >= 500:
+            raise _Retryable(
+                "服务不可用", kind="server", status=status,
+                retry_after=response.headers.get("Retry-After"),
+            )
+        if status in (401, 403):
+            raise LLMError("认证失败（不可重试）", kind="auth", status=status)
+        raise LLMError(
+            f"请求被拒绝（HTTP {status}，不可重试）", kind="bad_response", status=status
+        )
+
+    # -- 流式 ---------------------------------------------------------------
+
+    def _stream_once(
+        self,
+        client: httpx.Client,
+        url: str,
+        payload: dict,
+        headers: dict,
+        on_delta: Callable[[str], None],
+        attempts: int,
+    ) -> Completion:
+        payload = {
+            **payload,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        text_parts: list[str] = []
+        usage_dict: dict | None = None
+        with client.stream("POST", url, json=payload, headers=headers) as response:
+            self._raise_for_status(response)
+            for line in response.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except ValueError:
+                    continue  # 半行 / 心跳，跳过
+                if isinstance(obj.get("usage"), dict):
+                    usage_dict = obj["usage"]
+                for choice in obj.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    piece = delta.get("content")
+                    if isinstance(piece, str) and piece:
+                        text_parts.append(piece)
+                        on_delta(piece)
+                    thinking = delta.get("reasoning_content")
+                    if isinstance(thinking, str) and thinking:
+                        on_delta(thinking)  # 思考过程也可观测
+        return Completion(
+            text="".join(text_parts),
+            usage=_usage_from_dict(usage_dict),
+            raw={"stream": True, "usage": usage_dict},
+        )

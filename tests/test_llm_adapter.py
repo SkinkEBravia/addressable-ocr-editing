@@ -134,3 +134,56 @@ def test_unimplemented_protocol_rejected():
     )
     with pytest.raises(ConfigError, match="尚未实现"):
         build_client(cfg)
+
+
+_SSE_BODY = (
+    'data: {"choices":[{"delta":{"reasoning_content":"想"}}]}\n'
+    "\n"
+    'data: {"choices":[{"delta":{"content":"hel"}}]}\n'
+    "\n"
+    'data: {"choices":[{"delta":{"content":"lo"}}]}\n'
+    "\n"
+    'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":5,'
+    '"completion_tokens_details":{"reasoning_tokens":2}}}\n'
+    "\n"
+    "data: [DONE]\n"
+    "\n"
+)
+
+
+def test_streaming_deltas_and_usage():
+    """on_delta 非空 => 流式请求；增量回调（含思考）；usage 取流尾 chunk。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200, content=_SSE_BODY.encode(), headers={"Content-Type": "text/event-stream"}
+        )
+
+    deltas: list[str] = []
+    out = _client(handler).complete([Message("user", "hi")], on_delta=deltas.append)
+    assert seen["stream"] is True
+    assert seen["stream_options"] == {"include_usage": True}
+    assert deltas == ["想", "hel", "lo"]  # content 与 reasoning 都回调
+    assert out.text == "hello"  # 思考不进正文
+    assert out.usage is not None
+    assert out.usage.output_tokens == 5
+    assert out.usage.reasoning_tokens == 2
+    assert out.elapsed_s is not None and out.elapsed_s >= 0
+
+
+def test_no_delta_uses_plain_request():
+    """on_delta 缺省 => 非流式，payload 不带 stream。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert "stream" not in body
+        return httpx.Response(200, json=_ok_payload())
+
+    out = _client(handler).complete([Message("user", "hi")])
+    assert out.text == "hello"

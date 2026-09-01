@@ -44,11 +44,13 @@ class Completion:
 
     usage 为 None 表示端点未返回 usage（报告记 usage_missing）。
     raw 为端点原始响应（审计用）。
+    elapsed_s 为本次调用的墙钟秒数（含重试前的等待不含），供 TPS 统计。
     """
 
     text: str
     usage: Usage | None
     raw: Any = None
+    elapsed_s: float | None = None
 
 
 @dataclass(frozen=True)

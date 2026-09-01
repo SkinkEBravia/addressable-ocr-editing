@@ -67,6 +67,21 @@ python -m experiment --out runs/<name> --replay
 - 配置从旧 `report.json` 读回（当时运行的配置），不用当前 `configs/` 下的同名文件。
 - replay 结果写入 `report.json` 的 `replay` 段（`changed` / `lower_bound`）；原始对话录不动。
 
+## 运行时可观测
+
+doc 级任务单篇数分钟，盲跑到结束才知道失败不可接受。实验运行必须让操作者**中途就能判断是否正常、必要时中途打断**：
+
+- 每个 `(task, toolset)` cell 开始 / 结束即输出事件行（终态：`done` / `failed` + 原因）。
+- 进行中持续显示一条状态行：进度 `done/total`、当前 cell 标签、轮次、已耗墙钟、累计 output token 与 **TPS**（= output tokens / 生成耗时）。token 计数只认端点 usage；usage 未到达前可用增量估算，但必须标注 `~`，落盘与报告永远用端点值。
+- 流式启用（`on_delta` 接通）时，滚动显示**最近 3 行**模型增量输出（含思考流）——看见跑飞即可 Ctrl+C，已完成的轮次因逐轮落盘不白费。
+- TTY 下状态行与增量尾部原地刷新；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI 控制符。
+- 监控输出是纯观察通道：不进对话录、不进报告、不改变矩阵语义。
+
+并发：
+
+- `--workers N` 并发执行 cell（默认 1）。并发是实现细节：矩阵、落盘内容、报告与 `workers=1` 逐格执行完全一致。
+- 单端点可用并发上限不凭猜：用 `scripts/probe_concurrency.py` 对目标端点做阶梯实测（小请求逐级加压，看失败率与延迟拐点），据实测值选择 `--workers`。
+
 ## 报告
 
 `report.json` + 汇总表，维度：指标 × 工具配置 × 切片（语言 / 粒度，取自 `task.meta`）。
@@ -95,5 +110,5 @@ python -m experiment --out runs/<name> --replay
 
 - 不追求官方排名；masked split 不出数。
 - 不修改 `related_source/` 任何文件；外部评分器以本地依赖接入对应 `dataset.py`。
-- 并发 worker 是实现细节，不改变矩阵语义与落盘内容。
+- 并发 worker 与终端渲染是实现细节，不改变矩阵语义与落盘内容（见[运行时可观测](#运行时可观测)）。
 - 实验结论的解释限定（任务场景与测评口径的错配等）归数据集 `info().notes` 与报告口径段，不在本框架内硬编码。

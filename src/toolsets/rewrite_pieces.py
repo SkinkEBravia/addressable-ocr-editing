@@ -68,6 +68,7 @@ class RewritePiecesToolSet:
         instruction: str,
         workdir: Path,
         on_turn: "Any | None" = None,
+        on_delta: "Any | None" = None,
     ) -> LoopResult:
         units = _split_units(task.input, task.meta.get("unit_boundaries"))
         outputs: list[str] = []
@@ -88,7 +89,7 @@ class RewritePiecesToolSet:
                     + format_input(unit, task.meta),
                 )
             ]
-            completion = client.complete(messages)
+            completion = client.complete(messages, on_delta=on_delta)
             record = TurnRecord(len(turns), tuple(messages), completion, ())
             turns.append(record)
             if on_turn is not None:
