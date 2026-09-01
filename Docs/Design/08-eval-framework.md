@@ -73,6 +73,47 @@ noop        control-noop            control-noop
 
 温度等采样参数两臂一致（0.2，同 BLOCR）；逐样本单条调用，不沿用其批处理（批处理会混淆 token 归因）。
 
+## 臂配置（TOML）
+
+每个臂一个 TOML 文件，文件名即臂名，默认放在 `configs/arms/`。调提示词、改重试预算、换块粒度都只改 TOML，不动代码。
+
+```toml
+# configs/arms/blocr_system.toml
+channel     = "patch"         # noop | rewrite | patch | rewrite_pieces
+prompt      = "blocr_patch"   # 包内 prompts/ 模板名；含 "/" 或 ".md" 则按相对本文件的路径解析
+retries     = 2               # 失败重试预算（总轮数 = 1 + retries）
+temperature = 0.2             # 采样温度
+
+[patch]                       # channel == "patch" 的专有段
+partition   = "lines"         # lines | chars
+block_size  = 400             # partition == "chars" 时的块大小
+```
+
+规则：
+
+- `channel` 选择执行通道（代码路径），其余键缺省取内置默认值；**未知键直接报错**（防拼写漂移）。
+- CLI 解析：`--arms a,b` 把名字解析为 `configs/arms/<name>.toml`；`--arm-config <标签>=<路径>` 可重复，用自定义标签挂任意 TOML——**同一通道的两个提示词变体可在一次实验里配对比较**（如 `sys_v1` / `sys_v2`）。
+- `--model` 是运行级参数（全臂同模型，公平性）；`retries` / `temperature` 跨臂可配，但与对手臂不一致即破坏公平性控制，报告须注明。
+- 变体比较（同通道不同 prompt）不受「指令体逐字相同」约束，但报告标签必须区分。
+- 每个臂解析后的完整配置写入 `report.json`（`arms.<name>.config`），结果可复现、可审计。
+
+### 接口
+
+```python
+@dataclass(frozen=True)
+class ArmConfig:
+    name: str                  # 报告标签（= 文件名或 --arm-config 的标签）
+    channel: str               # noop | rewrite | patch | rewrite_pieces
+    prompt: str                # 模板名或模板路径
+    retries: int = 2
+    temperature: float = 0.2
+    partition: str = "lines"   # patch 通道
+    block_size: int = 400      # patch 通道
+
+def load_arm_config(name: str, path: Path) -> ArmConfig  # 解析 + 校验
+def build_arm(config: ArmConfig) -> Arm                  # channel -> runner 装配
+```
+
 ## 指标
 
 ### token 效率
@@ -102,6 +143,7 @@ noop        control-noop            control-noop
 `llm` 是与核心模块同级的独立模块；`experiment_app` 是测评的装配层，只经公开接口使用 `llm` 与本系统（`sourceio`/`partition`/`ir`/`reconstruction`/`view`/`surface`），不 import 内部。
 
 ```text
+configs/arms/          # 每臂一个 TOML：channel / prompt / retries / temperature / partition
 src/llm/               # 独立模块：LLM 访问
   client.py            # LLMClient 协议、Completion/Usage 类型
   deepseek.py          # DeepSeek 实现（OpenAI 兼容端点，httpx）
@@ -109,11 +151,12 @@ src/llm/               # 独立模块：LLM 访问
 
 src/experiment_app/    # 测评装配层
   datasets.py          # jsonl -> Sample；track-doc 拼接
-  arms.py              # blocr / blocr+system / ref / noop 四个 runner
+  arm_config.py        # ArmConfig：TOML 解析校验 + channel -> runner 装配
+  arms.py              # 四条执行通道：noop / rewrite / patch / rewrite_pieces
   prompts/             # blocr_rewrite.md / blocr_patch.md（共用指令体，输出条款不同）
   score.py             # 官方 scorer 适配器
   run.py               # 执行矩阵 + 原始记录落盘（jsonl）
-  report.py            # 汇总表：token × 性能 × 轨 × 语言
+  report.py            # 汇总表：token × 性能 × 轨 × 语言；arms.<name>.config 落盘
   __main__.py          # python -m experiment_app ...
 ```
 
