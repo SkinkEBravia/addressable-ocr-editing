@@ -12,16 +12,11 @@ import pytest
 from hipe_ocrepair_scorer import Evaluation, align_records
 
 from experiment_app import score as score_mod
-from experiment_app.arms import (
-    MAX_RETRIES,
-    arm_blocr,
-    arm_blocr_system,
-    arm_noop,
-    arm_ref_blocr_pieces,
-)
+from experiment_app.arm_config import DEFAULT_ARMS_DIR, ArmConfig, build_arm, load_arm_config
+from experiment_app.arms import Arm, MAX_RETRIES
 from experiment_app.datasets import Sample, load_samples
 from experiment_app.report import build_report, render_markdown
-from experiment_app.run import FakeClient, main, run_experiment, ARMS
+from experiment_app.run import DEFAULT_ARM_NAMES, FakeClient, main, run_experiment
 from experiment_app.score import score_pairs, write_hyp_jsonl, write_ref_jsonl
 from llm import Completion, Usage
 
@@ -43,6 +38,27 @@ class ScriptClient:
         return Completion(
             text=text, usage=Usage(input_tokens=len(prompt), output_tokens=len(text))
         )
+
+
+def make_arm(channel: str, **overrides) -> Arm:
+    """按通道名装配默认配置的臂（替代旧的硬编码 runner 直调）。"""
+    prompt = {
+        "noop": "",
+        "rewrite": "blocr_rewrite",
+        "patch": "blocr_patch",
+        "rewrite_pieces": "blocr_rewrite",
+    }[channel]
+    return build_arm(ArmConfig(name=channel, channel=channel, prompt=prompt, **overrides))
+
+
+def default_arms_and_clients() -> tuple[dict[str, Arm], dict[str, FakeClient]]:
+    """configs/arms/ 四个默认 TOML 装配出的臂 + 每臂独立 FakeClient。"""
+    arms = {
+        name: build_arm(load_arm_config(name, DEFAULT_ARMS_DIR / f"{name}.toml"))
+        for name in DEFAULT_ARM_NAMES
+    }
+    clients = {name: FakeClient() for name in arms}
+    return arms, clients
 
 
 def make_row(doc_id: str, ocr: str, gold: str, subset: str = "toy", lang: str = "en") -> dict:
@@ -145,7 +161,7 @@ class TestDatasets:
 class TestArmNoop:
     def test_noop(self, tmp_path: Path) -> None:
         sample = make_sample(ocr="raw ocr")
-        result = arm_noop(sample, ScriptClient([]), tmp_path)
+        result = make_arm("noop")(sample, ScriptClient([]), tmp_path)
         assert result.corrected_text == "raw ocr"
         assert result.tokens_in == 0
         assert result.tokens_out == 0
@@ -157,7 +173,7 @@ class TestArmNoop:
 class TestArmBlocr:
     def test_ok(self, tmp_path: Path) -> None:
         client = ScriptClient(['{"ocr_postcorrection_output": "fixed"}'])
-        result = arm_blocr(make_sample(), client, tmp_path)
+        result = make_arm("rewrite")(make_sample(), client, tmp_path)
         assert result.corrected_text == "fixed"
         assert result.failed is False
         assert result.rounds == 1
@@ -166,13 +182,13 @@ class TestArmBlocr:
 
     def test_markdown_fence_ok(self, tmp_path: Path) -> None:
         client = ScriptClient(['```json\n{"ocr_postcorrection_output": "fenced"}\n```'])
-        result = arm_blocr(make_sample(), client, tmp_path)
+        result = make_arm("rewrite")(make_sample(), client, tmp_path)
         assert result.corrected_text == "fenced"
         assert result.failed is False
 
     def test_bad_json_retry_then_ok(self, tmp_path: Path) -> None:
         client = ScriptClient(["not json", '{"ocr_postcorrection_output": "ok"}'])
-        result = arm_blocr(make_sample(), client, tmp_path)
+        result = make_arm("rewrite")(make_sample(), client, tmp_path)
         assert result.corrected_text == "ok"
         assert result.failed is False
         assert result.rounds == 2
@@ -184,7 +200,7 @@ class TestArmBlocr:
     def test_exhausted_falls_back(self, tmp_path: Path) -> None:
         client = ScriptClient(["bad"] * (MAX_RETRIES + 1))
         sample = make_sample(ocr="original")
-        result = arm_blocr(sample, client, tmp_path)
+        result = make_arm("rewrite")(sample, client, tmp_path)
         assert result.failed is True
         assert result.corrected_text == "original"
         assert result.rounds == MAX_RETRIES + 1
@@ -194,20 +210,20 @@ class TestArmBlocr:
 class TestArmBlocrSystem:
     def test_ok_set_content(self, tmp_path: Path) -> None:
         client = ScriptClient(['set_content(b2, "WORLD\\n")'])
-        result = arm_blocr_system(make_sample(), client, tmp_path)
+        result = make_arm("patch")(make_sample(), client, tmp_path)
         assert result.corrected_text == "hello\nWORLD\n"
         assert result.failed is False
         assert result.rounds == 1
 
     def test_empty_patch_keeps_original(self, tmp_path: Path) -> None:
         client = ScriptClient([""])
-        result = arm_blocr_system(make_sample(), client, tmp_path)
+        result = make_arm("patch")(make_sample(), client, tmp_path)
         assert result.corrected_text == "hello\nworld\n"
         assert result.failed is False
 
     def test_bad_patch_retry_then_ok(self, tmp_path: Path) -> None:
         client = ScriptClient(['remove(b99)', 'set_content(b1, "hi\\n")'])
-        result = arm_blocr_system(make_sample(), client, tmp_path)
+        result = make_arm("patch")(make_sample(), client, tmp_path)
         assert result.corrected_text == "hi\nworld\n"
         assert result.failed is False
         assert result.rounds == 2
@@ -216,7 +232,7 @@ class TestArmBlocrSystem:
 
     def test_parse_error_retry(self, tmp_path: Path) -> None:
         client = ScriptClient(["this is not a patch", 'set_content(b1, "x\\n")'])
-        result = arm_blocr_system(make_sample(), client, tmp_path)
+        result = make_arm("patch")(make_sample(), client, tmp_path)
         assert result.corrected_text == "x\nworld\n"
         assert result.failed is False
         assert result.rounds == 2
@@ -224,7 +240,7 @@ class TestArmBlocrSystem:
     def test_exhausted_falls_back(self, tmp_path: Path) -> None:
         client = ScriptClient(["remove(b99)"] * (MAX_RETRIES + 1))
         sample = make_sample(ocr="original")
-        result = arm_blocr_system(sample, client, tmp_path)
+        result = make_arm("patch")(sample, client, tmp_path)
         assert result.failed is True
         assert result.corrected_text == "original"
         assert result.rounds == MAX_RETRIES + 1
@@ -239,7 +255,7 @@ class TestArmRefBlocrPieces:
         client = ScriptClient(
             ['{"ocr_postcorrection_output": "FIRST"}', '{"ocr_postcorrection_output": "SECOND"}']
         )
-        result = arm_ref_blocr_pieces(sample, client, tmp_path)
+        result = make_arm("rewrite_pieces")(sample, client, tmp_path)
         assert result.corrected_text == "FIRST\nSECOND"
         assert result.failed is False
         assert result.rounds == 2
@@ -317,7 +333,7 @@ class TestRunReport:
                 "--out", str(out_dir),
                 "--model", "fake",
             ],
-            client_factory=lambda model: FakeClient(),
+            client_factory=lambda model, temperature=0.2: FakeClient(),
         )
         assert rc == 0
 
@@ -339,10 +355,13 @@ class TestRunReport:
 
         # report.json 落盘且自洽（build_report 内部校验 tokens_total == in + out）
         report = json.loads((out_dir / "report.json").read_text(encoding="utf-8"))
-        assert {g["arm"] for g in report["groups"]} == set(ARMS)
+        assert {g["arm"] for g in report["groups"]} == set(DEFAULT_ARM_NAMES)
         for g in report["groups"]:
             assert g["tokens_total"] == g["tokens_in"] + g["tokens_out"]
             assert g["n_samples"] == 3
+            assert g["config"]["channel"]  # 每臂解析后的完整配置落盘
+        assert report["arms"]["blocr"]["config"]["channel"] == "rewrite"
+        assert report["arms"]["blocr_system"]["config"]["partition"] == "lines"
 
         # 配对 output_ratio 存在（fake：两臂 tokens_out 均 > 0）
         paired = report["paired_output_ratio"][0]
@@ -364,8 +383,8 @@ class TestRunReport:
             make_sample("s1", ocr="helo\nworld\n", gold="hello\nworld\n"),
             make_sample("s2", ocr="ar.d\n", gold="and\n"),
         )
-        client = FakeClient()
-        record = run_experiment(samples, dict(ARMS), client, tmp_path / "out")
+        arms, clients = default_arms_and_clients()
+        record = run_experiment(samples, arms, clients, tmp_path / "out")
         assert len(record.records) == 2 * 4
 
         report = build_report(record, model="fake")

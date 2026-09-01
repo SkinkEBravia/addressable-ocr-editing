@@ -1,20 +1,25 @@
 """report：RunRecord -> 汇总表（markdown 打印 + json 落盘）。
 
-对应 Docs/Design/08-eval-framework.md「指标」「验收」节。
+对应 Docs/Design/08-eval-framework.md「指标」「臂配置（TOML）」「验收」节。
 
 - 维度：track × 子集（source_subset）× 臂。
 - 指标：cmer_micro / pref_score_cmer_macro（官方 scorer，含 95% CI）、
   tokens_in/out/total 合计、failed 数、配对 output_ratio
   （blocr+system / blocr 同样本 tokens_out 之比的中位数）。
 - 自洽校验：每样本 tokens_total == tokens_in + tokens_out，不满足抛 ValueError。
+- 每个臂解析后的完整配置写入 report.json：顶层 ``arms.<name>.config``
+  （08 文档口径）+ 每个 group 条目的 ``config`` 字段；retries/temperature
+  跨臂不一致时写入 ``fairness_warnings``（破坏公平性控制，报告须注明）。
 """
 
 from __future__ import annotations
 
 import json
 import statistics
+from dataclasses import asdict
 from pathlib import Path
 
+from experiment_app.arm_config import ArmConfig
 from experiment_app.run import RunRecord
 from experiment_app.score import score_pairs
 
@@ -35,8 +40,26 @@ def _validate_consistency(run_record: RunRecord) -> None:
             )
 
 
-def build_report(run_record: RunRecord, *, model: str | None = None) -> dict:
-    """从 RunRecord 产出结构化汇总 dict。"""
+def _fairness_warnings(arm_configs: dict[str, ArmConfig]) -> list[str]:
+    """retries / temperature 跨臂不一致 -> 警告（08 文档：报告须注明）。"""
+    knobs = {
+        name: (cfg.retries, cfg.temperature)
+        for name, cfg in arm_configs.items()
+        if cfg.channel != "noop"
+    }
+    if len(set(knobs.values())) <= 1:
+        return []
+    detail = ", ".join(f"{n}=(retries={r}, temperature={t})" for n, (r, t) in sorted(knobs.items()))
+    return [f"公平性控制被打破：LLM 臂的 (retries, temperature) 不一致：{detail}"]
+
+
+def build_report(
+    run_record: RunRecord,
+    *,
+    model: str | None = None,
+    arm_configs: dict[str, ArmConfig] | None = None,
+) -> dict:
+    """从 RunRecord 产出结构化汇总 dict；``arm_configs`` 提供时落盘每臂完整配置。"""
     _validate_consistency(run_record)
 
     samples_by_id = {sample.sample_id: sample for sample in run_record.samples}
@@ -57,20 +80,21 @@ def build_report(run_record: RunRecord, *, model: str | None = None) -> dict:
             raise ValueError(
                 f"inconsistent aggregated token counts for {track}/{subset}/{arm}"
             )
-        group_entries.append(
-            {
-                "track": track,
-                "source_subset": subset,
-                "arm": arm,
-                "n_samples": len(records),
-                "cmer_micro": list(averaged["cmer_micro"]),
-                "pref_score_cmer_macro": list(averaged["pref_score_cmer_macro"]),
-                "tokens_in": tokens_in,
-                "tokens_out": tokens_out,
-                "tokens_total": tokens_total,
-                "failed": sum(1 for r in records if r.failed),
-            }
-        )
+        entry = {
+            "track": track,
+            "source_subset": subset,
+            "arm": arm,
+            "n_samples": len(records),
+            "cmer_micro": list(averaged["cmer_micro"]),
+            "pref_score_cmer_macro": list(averaged["pref_score_cmer_macro"]),
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "tokens_total": tokens_total,
+            "failed": sum(1 for r in records if r.failed),
+        }
+        if arm_configs is not None and arm in arm_configs:
+            entry["config"] = asdict(arm_configs[arm])
+        group_entries.append(entry)
 
     paired_entries: list[dict] = []
     cells: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
@@ -96,12 +120,20 @@ def build_report(run_record: RunRecord, *, model: str | None = None) -> dict:
             }
         )
 
-    return {
+    report: dict = {
         "model": model,
         "track": run_record.track,
         "groups": group_entries,
         "paired_output_ratio": paired_entries,
     }
+    if arm_configs is not None:
+        report["arms"] = {
+            name: {"config": asdict(config)} for name, config in arm_configs.items()
+        }
+        warnings = _fairness_warnings(arm_configs)
+        if warnings:
+            report["fairness_warnings"] = warnings
+    return report
 
 
 def _fmt_metric(metric: list[float]) -> str:

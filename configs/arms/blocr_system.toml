@@ -1,0 +1,9 @@
+# blocr+system：本系统块补丁通道（fn patch）
+channel     = "patch"
+prompt      = "blocr_patch"
+retries     = 2
+temperature = 0.2
+
+[patch]
+partition   = "lines"
+block_size  = 400

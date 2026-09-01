@@ -1,12 +1,17 @@
 """run：执行矩阵 + 原始记录落盘 + CLI 入口。
 
-对应 Docs/Design/08-eval-framework.md「架构」「验收」节。
+对应 Docs/Design/08-eval-framework.md「架构」「臂配置（TOML）」「验收」节。
 
-- ``run_experiment``：逐样本 × 逐臂执行；每样本每臂的原始记录
-  （prompt/response/usage）落盘到 ``out_dir/raw/{sample_id}/{arm}.json``；
+- 臂由 TOML 配置驱动：``--arms a,b`` 解析为 ``configs/arms/<name>.toml``；
+  ``--arm-config 标签=路径`` 可重复，标签成为报告里的臂名（同通道两变体
+  可同跑，如 sys_v1 / sys_v2）。
+- 每臂独立 client：temperature 是臂级配置，``client_factory`` 签名
+  ``factory(model, *, temperature=...)``；``--model fake`` 用内置
+  FakeClient（确定性响应，离线冒烟），其他模型名默认 DeepSeekClient。
+- ``run_experiment``：逐样本 × 逐臂并发执行（ThreadPoolExecutor）；每样本
+  每臂的原始记录（prompt/response/usage）落盘到
+  ``out_dir/raw/{sample_id}/{arm}.json``，已存在则跳过（断点续跑）；
   汇总写 ``out_dir/results.jsonl``。
-- ``main``：CLI；``--model fake`` 用内置 FakeClient（确定性响应，离线冒烟），
-  其他模型名默认 DeepSeekClient。依赖注入：``main(argv, client_factory=...)``。
 """
 
 from __future__ import annotations
@@ -22,38 +27,33 @@ from pathlib import Path
 
 from llm import Completion, DeepSeekClient, LLMClient, Usage
 
-from experiment_app.arms import (
-    ArmResult,
-    arm_blocr,
-    arm_blocr_system,
-    arm_noop,
-    arm_ref_blocr_pieces,
+from experiment_app.arm_config import (
+    DEFAULT_ARMS_DIR,
+    ArmConfig,
+    build_arm,
+    load_arm_config,
 )
+from experiment_app.arms import Arm, ArmResult
 from experiment_app.datasets import Sample, load_samples
 
 __all__ = [
     "Arm",
-    "ARMS",
+    "DEFAULT_ARM_NAMES",
     "SampleArmRecord",
     "RunRecord",
     "FakeClient",
+    "ClientFactory",
     "default_client_factory",
+    "load_cli_arm_configs",
     "run_experiment",
     "main",
 ]
 
-Arm = Callable[[Sample, LLMClient, Path], ArmResult]
-"""臂签名：(sample, client, workdir) -> ArmResult。"""
+DEFAULT_ARM_NAMES = ("noop", "blocr", "blocr_system", "ref_blocr_pieces")
+"""默认臂：``configs/arms/`` 下的四个 TOML。"""
 
-ARMS: dict[str, Arm] = {
-    "noop": arm_noop,
-    "blocr": arm_blocr,
-    "blocr_system": arm_blocr_system,
-    "ref_blocr_pieces": arm_ref_blocr_pieces,
-}
-"""可用臂注册表（CLI --arms 的名字空间）。"""
-
-ClientFactory = Callable[[str], LLMClient]
+ClientFactory = Callable[..., LLMClient]
+"""client 工厂签名：``factory(model, *, temperature=...) -> LLMClient``。"""
 
 
 @dataclass(frozen=True)
@@ -121,11 +121,11 @@ def _extract_marked_text(prompt: str) -> str:
     return match.group(1) if match else ""
 
 
-def default_client_factory(model: str) -> LLMClient:
+def default_client_factory(model: str, *, temperature: float = 0.2) -> LLMClient:
     """默认 client 工厂：``fake`` -> FakeClient，其他 -> DeepSeekClient。"""
     if model == "fake":
         return FakeClient()
-    return DeepSeekClient(model=model)
+    return DeepSeekClient(model=model, temperature=temperature)
 
 
 _SAFE_ID = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -199,12 +199,14 @@ def _run_one(
 def run_experiment(
     samples: tuple[Sample, ...],
     arms: dict[str, Arm],
-    client: LLMClient,
+    clients: dict[str, LLMClient],
     out_dir: Path,
     workers: int = 8,
 ) -> RunRecord:
     """逐样本 × 逐臂并发执行，落盘原始记录与汇总 jsonl，返回 RunRecord。
 
+    - ``arms`` 与 ``clients`` 同键（臂名）；每臂用独立 client
+      （temperature 是臂级配置）。
     - ``workers`` 控制并发度（API 可并发）；每个 (sample, arm) 有独立
       workdir 与 raw 文件，天然线程安全。
     - 断点续跑：raw json 已存在的 (sample, arm) 跳过执行，直接读汇总字段。
@@ -219,7 +221,10 @@ def run_experiment(
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
-            pool.submit(_run_one, s, name, fn, client, out_dir): (s.sample_id, name)
+            pool.submit(_run_one, s, name, fn, clients[name], out_dir): (
+                s.sample_id,
+                name,
+            )
             for s, name, fn in tasks
         }
         for future in as_completed(futures):
@@ -262,8 +267,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--track", choices=["unit", "doc"], required=True)
     parser.add_argument(
         "--arms",
-        default=",".join(ARMS),
-        help=f"逗号分隔的臂名，可选：{', '.join(ARMS)}（默认全部）",
+        default=",".join(DEFAULT_ARM_NAMES),
+        help="逗号分隔的臂名，解析为 configs/arms/<name>.toml（默认四个默认臂）",
+    )
+    parser.add_argument(
+        "--arm-config",
+        action="append",
+        default=[],
+        metavar="标签=路径",
+        help="自定义臂配置（可重复）；标签成为报告里的臂名",
     )
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     parser.add_argument("--out", required=True, metavar="DIR")
@@ -272,6 +284,36 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--workers", type=int, default=8, metavar="N", help="并发度（默认 8）"
     )
     return parser.parse_args(argv)
+
+
+def load_cli_arm_configs(arms: str, arm_config_specs: list[str]) -> dict[str, ArmConfig]:
+    """CLI 参数 -> {臂名: ArmConfig}。
+
+    - ``--arms a,b`` -> ``configs/arms/<name>.toml``；文件不存在报清晰错误。
+    - ``--arm-config 标签=路径``：标签成为报告里的臂名；与 --arms 重名报错。
+    """
+    configs: dict[str, ArmConfig] = {}
+    for name in arms.split(","):
+        name = name.strip()
+        path = DEFAULT_ARMS_DIR / f"{name}.toml"
+        if not path.is_file():
+            raise SystemExit(
+                f"arm 配置不存在: {path}（--arms {name!r}；"
+                f"自定义配置请用 --arm-config 标签=路径）"
+            )
+        configs[name] = load_arm_config(name, path)
+    for spec in arm_config_specs:
+        label, sep, path_text = spec.partition("=")
+        if not sep or not label.strip() or not path_text.strip():
+            raise SystemExit(f"--arm-config 需要 '标签=路径' 形式，got {spec!r}")
+        label = label.strip()
+        if label in configs:
+            raise SystemExit(f"臂名重复: {label!r}（--arms 与 --arm-config 冲突）")
+        path = Path(path_text.strip())
+        if not path.is_file():
+            raise SystemExit(f"arm 配置不存在: {path}（--arm-config {spec!r}）")
+        configs[label] = load_arm_config(label, path)
+    return configs
 
 
 def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None = None) -> int:
@@ -286,23 +328,22 @@ def main(argv: list[str] | None = None, *, client_factory: ClientFactory | None 
     if not samples:
         raise SystemExit("no samples loaded")
 
-    selected: dict[str, Arm] = {}
-    for name in args.arms.split(","):
-        name = name.strip()
-        if name not in ARMS:
-            raise SystemExit(f"unknown arm: {name!r} (available: {', '.join(ARMS)})")
-        selected[name] = ARMS[name]
+    arm_configs = load_cli_arm_configs(args.arms, args.arm_config)
+    arms = {name: build_arm(config) for name, config in arm_configs.items()}
 
     factory = client_factory or default_client_factory
-    client = factory(args.model)
+    clients = {
+        name: factory(args.model, temperature=config.temperature)
+        for name, config in arm_configs.items()
+    }
 
     run_record = run_experiment(
-        tuple(samples), selected, client, Path(args.out), workers=args.workers
+        tuple(samples), arms, clients, Path(args.out), workers=args.workers
     )
 
     from experiment_app.report import build_report, render_markdown
 
-    report = build_report(run_record, model=args.model)
+    report = build_report(run_record, model=args.model, arm_configs=arm_configs)
     report_path = Path(args.out) / "report.json"
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
