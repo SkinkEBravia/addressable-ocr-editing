@@ -203,9 +203,18 @@ def _affected(
     old_index = {b.key: i for i, b in enumerate(old.blocks)}
 
     plan = _plan(surface_ops, old_ref_map, old.key_cursor)
+    # 同一块可能被多条内容 op 命中（如连续 replace）：回执中每块只出现一次，
+    # 位置取首次出现，status 取最后一次
+    order: list[BlockKey] = []
+    final_status: dict[BlockKey, str] = {}
+    for status, key in plan:
+        if key not in final_status:
+            order.append(key)
+        final_status[key] = status
     present_entries: list[tuple[int, AffectedBlock]] = []
     removed_entries: list[tuple[int, AffectedBlock]] = []
-    for status, key in plan:
+    for key in order:
+        status = final_status[key]
         if status == STATUS_REMOVED:
             removed_entries.append(
                 (

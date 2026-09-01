@@ -14,10 +14,14 @@
 - 未知 ``AgentBlockId`` 等直接产出 ``SurfaceError``（stage="degrade"），
   不进入 apply。
 
-与 07 文档签名的一处补充：降解需要读取 patch 前快照的块内容（move 的
-draft、merge 的 a.content + b.content、replace 的 content），因此签名带
-第三个参数 ``snapshot``。move / merge / replace 读取的都是 **patch 之前**
-快照的内容——降解是静态展开，不感知同批次内前面的 set_content 等修改。
+与 07 文档签名的一处补充：降解需要读取块内容（move 的 draft、merge 的
+a.content + b.content、replace 的 content），因此签名带第三个参数
+``snapshot``。
+
+**内容状态链式，身份与结构静态**：同一 patch 内，对同一块的内容操作
+（set_content / replace / merge 的合入内容、move 带走的 draft）按文本
+顺序叠加——后续操作看到同批次前面操作的结果；``set_content`` 是绝对
+重置。块身份（id -> key）与结构（谁在谁后面）始终以 patch 前快照为准。
 """
 
 from __future__ import annotations
@@ -126,16 +130,26 @@ def degrade(
 
     - ``ref_map`` 必须属于 patch 之前的 View（同一 patch 内不得引用本次
       新建的块）。
-    - ``snapshot`` 为 patch 前快照，供 move / merge 读取块内容。
+    - ``snapshot`` 为 patch 前快照，供 move / merge / replace 读取块内容。
     - 未知 AgentBlockId 等降解失败抛 ``SurfaceError``（stage="degrade"）。
     """
     by_key = {b.key: b for b in snapshot.blocks}
+    # 批次内累计内容：key -> 最新内容。内容操作链式生效（见模块 docstring）。
+    content_state: dict[str, str] = {}
+
+    def current_content(key: str, index: int, position: LineSpan) -> str:
+        """块的当前内容：批次内已被改则取累计值，否则取 patch 前快照。"""
+        if key in content_state:
+            return content_state[key]
+        return _block(by_key, key, index, position).content
+
     entries: list[CoreOpEntry] = []
     for index, sop in enumerate(surface_ops):
         position = sop.position
         match sop:
             case SetContent(id=agent_id, text=text):
                 key = _target_key(agent_id, ref_map, index, position)
+                content_state[key] = text
                 core = [ir.SetContent(key=key, content=text)]
             case SetAttrs(id=agent_id, attrs=attrs):
                 key = _target_key(agent_id, ref_map, index, position)
@@ -159,7 +173,8 @@ def degrade(
                 core = [
                     ir.Remove(key=key),
                     ir.Append(
-                        draft_content=block.content,
+                        # draft 取链式内容：move 带走批次内已做的修改
+                        draft_content=current_content(key, index, position),
                         draft_attrs=dict(block.attrs),
                         at=at,
                     ),
@@ -167,16 +182,20 @@ def degrade(
             case Merge(a=a_id, b=b_id):
                 key_a = _target_key(a_id, ref_map, index, position)
                 key_b = _target_key(b_id, ref_map, index, position)
-                block_a = _block(by_key, key_a, index, position)
-                block_b = _block(by_key, key_b, index, position)
+                merged = (
+                    current_content(key_a, index, position)
+                    + current_content(key_b, index, position)
+                )
+                content_state[key_a] = merged
                 core = [
-                    ir.SetContent(key=key_a, content=block_a.content + block_b.content),
+                    ir.SetContent(key=key_a, content=merged),
                     ir.Remove(key=key_b),
                 ]
             case Replace(id=agent_id, old=old, new=new):
                 key = _target_key(agent_id, ref_map, index, position)
-                block = _block(by_key, key, index, position)
-                if old not in block.content:
+                # 链式：在批次内累计内容上匹配与替换
+                current = current_content(key, index, position)
+                if old not in current:
                     raise SurfaceError(
                         stage=STAGE_DEGRADE,
                         surface_index=index,
@@ -188,7 +207,9 @@ def degrade(
                             f"{agent_id!r} (stale view? re-render before patching)"
                         ),
                     )
-                core = [ir.SetContent(key=key, content=block.content.replace(old, new))]
+                updated = current.replace(old, new)
+                content_state[key] = updated
+                core = [ir.SetContent(key=key, content=updated)]
             case _:
                 raise TypeError(f"not a SurfaceOp: {sop!r}")
         entries.extend(

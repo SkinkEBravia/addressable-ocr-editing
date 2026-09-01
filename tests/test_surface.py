@@ -244,6 +244,59 @@ class TestDegrade:
         assert "zz" in exc.message
         json.dumps(exc.to_dict())
 
+    def test_replace_chains_within_batch(self) -> None:
+        """同一块的连续 replace 链式生效：后者在前者的结果上匹配。"""
+        snapshot = _snapshot()  # b1 = "aaaa"
+        entries = degrade(
+            parse('replace(b1, "a", "X")\nreplace(b1, "X", "Y")'),
+            _ref_map(snapshot),
+            snapshot,
+        )
+        # 每条 replace 都产出携带累计内容的 SetContent；apply 后 last-wins，
+        # 净效果 = 两处修复都生效
+        assert [op for op, _ in entries] == [
+            ir.SetContent(key="b1", content="XXXX"),
+            ir.SetContent(key="b1", content="YYYY"),
+        ]
+
+    def test_set_content_then_replace_chains(self) -> None:
+        snapshot = _snapshot()
+        entries = degrade(
+            parse('set_content(b1, "hello wrold")\nreplace(b1, "wrold", "world")'),
+            _ref_map(snapshot),
+            snapshot,
+        )
+        assert [op for op, _ in entries] == [
+            ir.SetContent(key="b1", content="hello wrold"),
+            ir.SetContent(key="b1", content="hello world"),
+        ]
+
+    def test_merge_then_replace_chains(self) -> None:
+        snapshot = _snapshot()  # b1 = "aaaa", b2 = "bbbb"
+        entries = degrade(
+            parse('merge(b1, b2)\nreplace(b1, "bbbb", "BBBB")'),
+            _ref_map(snapshot),
+            snapshot,
+        )
+        assert [op for op, _ in entries] == [
+            ir.SetContent(key="b1", content="aaaabbbb"),
+            ir.Remove(key="b2"),
+            ir.SetContent(key="b1", content="aaaaBBBB"),
+        ]
+
+    def test_move_after_replace_carries_updated_draft(self) -> None:
+        snapshot = _snapshot()
+        entries = degrade(
+            parse('replace(b1, "aaaa", "XX")\nmove(b1, b3)'),
+            _ref_map(snapshot),
+            snapshot,
+        )
+        assert [op for op, _ in entries] == [
+            ir.SetContent(key="b1", content="XX"),
+            ir.Remove(key="b1"),
+            ir.Append(draft_content="XX", draft_attrs={"start": 0}, at="b3"),
+        ]
+
 
 class TestRunPatch:
     def test_set_content_success(self, tmp_path) -> None:
@@ -321,6 +374,23 @@ class TestRunPatch:
         assert exc.stage == "degrade"
         assert exc.cause == PATTERN_NOT_FOUND
         assert _store_fingerprint(store) == before
+
+    def test_multiple_replaces_on_same_block_all_apply(self, tmp_path) -> None:
+        """回归：同一块的多个 replace 必须全部生效（实验暴露的静态降解缺陷）。"""
+        store, _ = _store(tmp_path)
+        result = run_patch(
+            store,
+            'replace(b1, "aaaa", "XX")\nreplace(b1, "XX", "YY")\nreplace(b2, "bbbb", "BB")',
+            blockkey_as_is,
+            xml_ish,
+        )
+        new = ir.load(store, result.snapshot_id)
+        assert "".join(b.content for b in new.blocks) == "YYBBccccdddd"
+        # affected 按块去重：b1 被两条 replace 命中，只出现一次
+        assert [(ab.key, ab.status) for ab in result.affected] == [
+            ("b1", "updated"),
+            ("b2", "updated"),
+        ]
 
     def test_remove_reports_removed(self, tmp_path) -> None:
         store, _ = _store(tmp_path)

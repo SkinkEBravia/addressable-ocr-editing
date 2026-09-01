@@ -36,6 +36,7 @@ surface 层固定提供七个操作：四个核心 op 的直译 + 三个包装�
 
 - `id` / `anchor` 均为 `AgentBlockId`；`anchor` 可取头部保留值。
 - 同一 patch 内的所有 id 以 **patch 之前的 View** 为准；patch 内不得引用本次新建的块（其 id 在结果中返回，供下一次 patch 使用）。
+- **内容操作链式叠加**：同一 patch 内对同一块的内容操作按文本顺序生效——`replace` / `merge` 看到同批次前面 `set_content` / `replace` 的结果，`move` 带走的也是最新内容；`set_content` 是绝对重置。
 
 ## 定义
 
