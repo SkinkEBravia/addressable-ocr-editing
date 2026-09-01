@@ -11,7 +11,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "hypothesis>=6"]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6",
+]
 
 [build-system]
 requires = ["hatchling"]

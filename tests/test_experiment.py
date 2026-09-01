@@ -223,18 +223,16 @@ def test_progress_non_tty_events():
     """非 TTY（StringIO）：退化为事件行，不崩、不喷 ANSI。"""
     import io
 
-    from experiment.progress import Progress
-
-    buf = io.StringIO()
-    p = Progress(stream=buf)
-    p.begin(2)
-    p.start_cell("t1 × noop")
-    p.delta("hello\nwor")
-    p.delta("ld\n")
+    from experiment.progress import RichProgress
     from llm import Usage
 
+    buf = io.StringIO()
+    p = RichProgress(stream=buf)
+    p.begin(2)
+    p.start_cell("t1 × noop")
     p.turn(Usage(input_tokens=3, output_tokens=5))
     p.end_cell("t1 × noop", "done", Usage(input_tokens=3, output_tokens=5), 1.0)
+    p.close()
     text = buf.getvalue()
     assert "[start] t1 × noop" in text
     assert "[1/2] t1 × noop -> done" in text
@@ -243,17 +241,16 @@ def test_progress_non_tty_events():
 
 
 def test_progress_tty_live_repaint():
-    """模拟 TTY（rich force_terminal）：Live 原地重绘，超宽行被裁剪。"""
+    """模拟 TTY（rich force_terminal）：Live 原地重绘状态行 + 最近事件。"""
     import io
 
-    from experiment.progress import Progress
+    from experiment.progress import RichProgress
     from llm import Usage
 
     buf = io.StringIO()
-    p = Progress(stream=buf, force_terminal=True)
+    p = RichProgress(stream=buf, force_terminal=True)
     p.begin(1)
     p.start_cell("t1 × rewrite")
-    p.delta("x" * 500 + "\n短行\n")  # 超长行由 rich 按终端宽度处理
     p.turn(Usage(input_tokens=3, output_tokens=5))
     p.end_cell("t1 × rewrite", "done", Usage(input_tokens=3, output_tokens=5), 2.0)
     p.close()
@@ -261,7 +258,22 @@ def test_progress_tty_live_repaint():
     assert "\x1b[" in text  # Live 重绘走 ANSI 光标控制
     assert "t1 × rewrite | turn 1" in text
     assert "t1 × rewrite -> done" in text  # 最近事件进刷新块，不堆历史
-    assert "x" * 500 not in text  # 超宽行被裁剪/折行，不会一行打满
+
+
+def test_reporter_registry_and_protocol():
+    """可插拔入口：内建名字与 module:Class 动态加载都要过协议检查。"""
+    from experiment.progress import NullProgress, RichProgress, build_reporter
+
+    assert isinstance(build_reporter(None), RichProgress)
+    assert isinstance(build_reporter("rich"), RichProgress)
+    assert isinstance(build_reporter("null"), NullProgress)
+    custom = build_reporter("experiment.progress:NullProgress")
+    assert isinstance(custom, NullProgress)
+    with pytest.raises(ValueError, match="未知报告器"):
+        build_reporter("nope")
+    with pytest.raises(TypeError, match="ProgressReporter"):
+        build_reporter("builtins:dict")  # 实例不满足协议 => 拒绝
+
 
 
 def test_stub_client_streams_deltas():

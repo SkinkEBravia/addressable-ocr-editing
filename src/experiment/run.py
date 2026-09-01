@@ -113,6 +113,9 @@ def run_experiment(
             _w.write_turn(turn, turns)
             progress.turn(turn.completion.usage)
 
+        # 流式观察通道（搁置）：报告器声明了 delta 才接入，否则非流式请求
+        on_delta = getattr(progress, "delta", None)
+
         try:
             result = run_toolset(
                 client,
@@ -122,8 +125,9 @@ def run_experiment(
                 instruction,
                 workdir,
                 on_turn=on_turn,
-                on_delta=progress.delta,
+                on_delta=on_delta,
             )
+            status = result.status
         except LLMError as exc:
             result = LoopResult(
                 output=task.input,  # 失败回退原文
@@ -131,12 +135,10 @@ def run_experiment(
                 turns=(),
                 total_usage=None,
             )
-            progress.delta(f"\n[LLMError:{exc.kind}] {exc}\n")
+            status = f"failed:{exc.kind}"  # 事件行带失败类别
         writer.finalize(result, list(result.turns))
         summary[str((task.task_id, cfg.name))] = result.status
-        progress.end_cell(
-            label, result.status, result.total_usage, time.monotonic() - t0
-        )
+        progress.end_cell(label, status, result.total_usage, time.monotonic() - t0)
 
     if workers <= 1:
         for cell in cells:

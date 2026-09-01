@@ -69,15 +69,28 @@ python -m experiment --out runs/<name> --replay
 
 ## 运行时可观测
 
-doc 级任务单篇数分钟，盲跑到结束才知道失败不可接受。实验运行必须让操作者**中途就能判断是否正常、必要时中途打断**：
+doc 级任务单篇数分钟，盲跑到结束才知道失败不可接受。实验运行必须让操作者**中途就能判断是否正常、必要时中途打断**。
 
-- 每个 `(task, toolset)` cell 开始 / 结束即输出事件行（终态：`done` / `failed` + 原因）。
-- 进行中持续显示一条状态行：进度 `done/total`、当前 cell 标签、轮次、已耗墙钟、累计 output token 与 **TPS**（= output tokens / 生成耗时）。token 计数只认端点 usage；usage 未到达前可用增量估算，但必须标注 `~`，落盘与报告永远用端点值。
-- 流式启用（`on_delta` 接通）时，滚动显示**最近 3 行**模型增量输出（含思考流）——看见跑飞即可 Ctrl+C，已完成的轮次因逐轮落盘不白费。
-- TTY 下状态行与增量尾部原地刷新；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI 控制符。
-- 监控输出是纯观察通道：不进对话录、不进报告、不改变矩阵语义。
+### 报告器接口（可插拔）
 
-并发：
+`experiment` 只面向 `ProgressReporter` 协议编程，实现可整体替换（CLI `--reporter rich|null|module:Class`）：
+
+```python
+class ProgressReporter(Protocol):
+    def begin(self, total: int) -> None: ...        # 矩阵开始，告知 cell 总数
+    def start_cell(self, label: str) -> None: ...   # label = "task_id × toolset"
+    def turn(self, usage: Usage | None) -> None: ...  # 一轮完成；None = 端点未返回
+    def end_cell(self, label: str, status: str,     # done / failed[:kind] / resumed
+                 usage: Usage | None, elapsed_s: float) -> None: ...
+    def close(self) -> None: ...                    # 运行结束（含 Ctrl+C），释放终端资源
+```
+
+- 全部为观察回调，不得影响实验语义；监控输出不进对话录、不进报告。
+- 内建 `RichProgress`（rich.Live）：TTY 原地刷新状态行（进度 `done/total`、当前 cell、轮次、墙钟、out token、**TPS**）+ 最近事件行；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI；`NullProgress` 为全空缺省。
+- token 计数只认端点 usage；报告中的 usage/TPS 以落盘的端点值为准。
+- **流式增量显示（模型输出尾部滚动）搁置**：协议不含 `delta`；实现者自行声明 `delta(text)` 后由 run 层探测接入（`getattr`），未声明则走非流式请求。08 的 `on_delta` 管线保留。
+
+### 并发
 
 - `--workers N` 并发执行 cell（默认 1）。并发是实现细节：矩阵、落盘内容、报告与 `workers=1` 逐格执行完全一致。
 - 单端点可用并发上限不凭猜：用 `scripts/probe_concurrency.py` 对目标端点做阶梯实测（小请求逐级加压，看失败率与延迟拐点），据实测值选择 `--workers`。
