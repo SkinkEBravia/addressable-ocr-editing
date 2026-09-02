@@ -124,18 +124,6 @@ def test_bad_json_is_bad_response():
     assert ei.value.kind == "bad_response"
 
 
-def test_unimplemented_protocol_rejected():
-    from llm import ConfigError, build_client
-    import os
-
-    os.environ["K2"] = "sk-x"
-    cfg = ModelConfig(
-        name="t", protocol="anthropic", base_url="https://x", model="m", key_env="K2"
-    )
-    with pytest.raises(ConfigError, match="尚未实现"):
-        build_client(cfg)
-
-
 _SSE_BODY = (
     'data: {"choices":[{"delta":{"reasoning_content":"想"}}]}\n'
     "\n"

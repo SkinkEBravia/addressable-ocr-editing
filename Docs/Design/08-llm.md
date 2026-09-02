@@ -78,12 +78,14 @@ def build_client(config: ModelConfig) -> LLMClient
 
 | protocol | 线格式 | system 处理 | reasoning 映射 |
 |---|---|---|---|
-| `openai-completion` | `POST {base_url}/chat/completions` | `messages` 首条 `role=system` | `reasoning_effort` |
 | `openai-response` | `POST {base_url}/responses` | 顶层 `instructions` 字段 | `reasoning.effort` |
-| `anthropic` | `POST {base_url}/v1/messages` | 顶层 `system` 字段 | `thinking` 段 |
+| `anthropic` | `POST {base_url}/v1/messages` | 顶层 `system` 字段 | v1 不下发（配置 `reasoning_effort` ⇒ `ConfigError`，不静默忽略） |
+| `openai-completion` | `POST {base_url}/chat/completions` | `messages` 首条 `role=system` | `reasoning_effort` |
 
 规则：
 
+- **接入优先级：`openai-response` / `anthropic` 优先，`openai-completion` 是次级兼容选择**——新端点先验证前两者可用，不可用才退 completion。
+- `anthropic` 协议必须显式 `output_length`（作为 `max_tokens` 下发，该协议强制）；其余协议下 `output_length` 仍为信息性字段。
 - 某协议不支持配置中出现的采样键 ⇒ `ConfigError`，**不静默忽略**（公平性要求参数要么生效、要么报错）。
 - 换模型 = 换 TOML，不动代码；新协议 = 新增一个适配器，`LLMClient` 与上层不变。
 

@@ -77,7 +77,7 @@ LoopResult = { output: str,                              # extract 的产物
 
 行为规则：
 
-1. **提示词组装**：首条 user 消息 = `instruction` + `prompt_clause` + `task_input`，顺序固定、逐字拼接、进对话录。instruction 属任务（默认来自数据集，见 [10](10-datasets.md)），prompt_clause 属工具集——两段各有主人，拼接口径全实验一致。
+1. **提示词组装**：`system` 消息 = `instruction` + `prompt_clause`（顺序固定、逐字拼接）；首条 `user` 消息 = 输入呈现（`present_input` + `format_input`）。instruction 属任务（默认来自数据集，见 [10](10-datasets.md)——BLOCR 等任务的指令原文本就是 SYSTEM_PROMPT），prompt_clause 属工具集——两段各有主人，拼接口径全实验一致。组装函数只有一个（loop 与自定义 runner 共用），进对话录。
 2. 每轮：`complete` → `parse` → 按序 `invoke` → feedback 进下一轮；`parse` 得 `Done` ⇒ `extract` 后结束。
 3. `ParseError` 与工具失败走同一通道：作为 feedback 进下一轮。
 4. 轮内不截断历史；历史管理（压缩/截断）不在 v1。

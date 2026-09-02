@@ -2,42 +2,30 @@
 
 布局：ocr/<id>.txt + gold/<id>.txt（缺 gold 文件 = masked，reference=None）。
 评分：简易字符错误率（cER），只用于测试自洽，口径不与任何官方成绩可比。
+loader key：tiny/en/unit（单一子集，命名与真实数据集同构）。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from datasetkit import DatasetInfo, ScoreError, Task
+from datasetkit import DatasetInfo, Loader, ScoreError, Task
 
 _DIR = Path(__file__).resolve().parent
 
-__all__ = ["tasks", "scorer", "default_instruction", "info"]
+__all__ = ["loaders", "scorer", "default_instruction", "info"]
+
+_SPLITS = ("all",)
 
 
-def tasks(
-    *,
-    split: str = "all",
-    granularity: str | None = None,
-    ids: list[str] | None = None,
-    languages: list[str] | None = None,
-    limit: int | None = None,
-) -> list[Task]:
-    if split != "all":
-        raise ValueError(f"tiny 只有 split='all'，got {split!r}")
-    if granularity not in (None, "unit"):
-        raise ValueError(f"tiny 只有 granularity='unit'，got {granularity!r}")
+def _load() -> list[Task]:
     out: list[Task] = []
     for path in sorted((_DIR / "ocr").glob("*.txt")):
         task_id = path.stem
-        if ids is not None and task_id not in ids:
-            continue
         gold_path = _DIR / "gold" / f"{task_id}.txt"
         reference = (
             gold_path.read_text(encoding="utf-8") if gold_path.is_file() else None
         )
-        if languages is not None and "en" not in languages:
-            continue
         out.append(
             Task(
                 task_id=task_id,
@@ -46,9 +34,13 @@ def tasks(
                 meta={"language": "en"},
             )
         )
-    if limit is not None:
-        out = out[:limit]
     return out
+
+
+def loaders(*, split: str = "all") -> dict[str, Loader]:
+    if split != "all":
+        raise ValueError(f"tiny 只有 split='all'，got {split!r}")
+    return {"tiny/en/unit": _load}
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -88,10 +80,10 @@ def info() -> DatasetInfo:
     return DatasetInfo(
         name="tiny",
         version="0.1",
-        splits=("all",),
-        granularities=("unit",),
+        splits=_SPLITS,
         notes=(
             "契约夹具数据集：手写样本，cER 为简易字符错误率口径，"
             "不与任何官方成绩可比；t3 为 masked 样例。"
+            "loader key 命名：`<subset>/<language>/<granularity>`（tiny/en/unit）。"
         ),
     )

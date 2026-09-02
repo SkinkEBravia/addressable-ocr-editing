@@ -16,12 +16,13 @@ dataset.py × 工具配置 × 模型配置 -> 执行矩阵 -> 对话录落盘 ->
 
 ```text
 python -m experiment --dataset <dir> --toolsets a,b --models m \
-    --split dev [--granularity doc] [--ids ...] [--languages de,en] [--limit N] \
+    --split dev [--loaders icdar2017/en/doc,dta19-l0/de/chunk] \
+    [--ids-from meta:document=periodical__eng_periodical-3] [--ids ...] [--limit N] \
     [--instruction <模板名|路径>] --out runs/<name>
 ```
 
 - `--dataset` 指向含 `dataset.py` 的目录；`--toolsets` / `--models` 把名字解析为 `configs/toolsets/<name>.toml` / `configs/models/<name>.toml`；`--arm-config` 式自定义标签同旧规，可重复挂载任意 TOML。
-- `--split` / `--granularity` / `--ids` / `--languages` / `--limit` 原样透传给 `dataset.py` 的 `tasks()`——处理对象的选择权在数据集入口。
+- `--loaders` 按键名选择数据集 loader（见 [10](10-datasets.md)「loader 风格的选择接口」），缺省 = 该 split 全部 loader 串联；`--ids-from meta:key=value`（可重复，AND）在串联结果上按 `task.meta` 等值过滤；`--ids` / `--limit` 再截断——处理对象的选择 = 选 loader + 串联 + 过滤 + 截断，组合权在装配层。
 - `--instruction` 覆盖 `default_instruction()`；缺省用数据集的。
 
 ## 公平性
@@ -48,7 +49,7 @@ python -m experiment --dataset <dir> --toolsets a,b --models m \
 - 请求 messages 全文按内容哈希去重存放（多轮前缀大量重复）；对话录可完整重建每一轮的请求与响应，**可审计**。
 - **逐轮增量落盘**：每轮完成即追加写盘，不是任务完成后一次性写——长任务被中断时已跑的轮次不白费（踩坑记录 #7）。
 - **对话录是不可再生资产**：响应只能由 API 重新付费获得，后处理永远可以重算（踩坑记录 #2）；任何清理操作不得删 `raw/`。
-- 续跑（resume）的键 = `(task_id, 工具配置哈希)`——同名配置换了内容必须视为新运行，否则探索期必然吃到陈数据（踩坑记录 #7）。
+- 续跑（resume）的键 = `(task_id, 工具配置哈希)`——同名配置换了内容必须视为新运行，否则探索期必然吃到陈数据（踩坑记录 #7）。`failed[:kind]` 不算完成态：重跑同命令时 failed cell 自动重试，done cell 跳过；瞬时限流/超时不应被 resume 吞掉。
 - 解析后的全部配置（models / toolsets / dataset 入口与 tasks 参数 / instruction 来源）写入 `report.json`，结果可复现。
 
 ## replay
@@ -88,7 +89,7 @@ class ProgressReporter(Protocol):
 - 全部为观察回调，不得影响实验语义；监控输出不进对话录、不进报告。
 - 内建 `RichProgress`（rich.Live）：TTY 原地刷新状态行（进度 `done/total`、当前 cell、轮次、墙钟、out token、**TPS**）+ 最近事件行；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI；`NullProgress` 为全空缺省。
 - token 计数只认端点 usage；报告中的 usage/TPS 以落盘的端点值为准。
-- **流式增量显示（模型输出尾部滚动）搁置**：协议不含 `delta`；实现者自行声明 `delta(text)` 后由 run 层探测接入（`getattr`），未声明则走非流式请求。08 的 `on_delta` 管线保留。
+- **流式 TPS**：报告器声明 `delta(text)` ⇒ run 层探测后切流式请求（08 的 `on_delta` 管线），状态行显示滚动 TPS——轮内用增量字符估值（标 `~`），轮末以端点 usage 精确值为准。**只计数不预览**：模型输出文本不进终端；输出预览类显示明确不做。
 
 ### 并发
 

@@ -1,6 +1,9 @@
 """LLMClient 协议与 build_client 工厂。
 
 对应 Docs/Design/08-llm.md「接口」「协议适配器」节。
+
+协议优先级（08「协议适配器」）：openai-response / anthropic 优先，
+openai-completion 为次级兼容选择。
 """
 
 from __future__ import annotations
@@ -36,6 +39,12 @@ def build_client(config: ModelConfig) -> LLMClient:
         from llm.adapters.openai_completion import OpenAICompletionClient
 
         return OpenAICompletionClient(config, resolve_api_key(config))
-    raise ConfigError(
-        f"protocol {config.protocol!r} 的适配器尚未实现（v1 仅 openai-completion）"
-    )
+    if config.protocol == "openai-response":
+        from llm.adapters.openai_response import OpenAIResponseClient
+
+        return OpenAIResponseClient(config, resolve_api_key(config))
+    if config.protocol == "anthropic":
+        from llm.adapters.anthropic import AnthropicClient
+
+        return AnthropicClient(config, resolve_api_key(config))
+    raise ConfigError(f"未知 protocol {config.protocol!r}（openai-response / anthropic / openai-completion）")

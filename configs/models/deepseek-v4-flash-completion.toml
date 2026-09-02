@@ -1,0 +1,8 @@
+# DeepSeek（chat/completions 兼容端点）——降级配置，仅在主配置
+#（anthropic，见 deepseek-v4-flash.toml）不可用时使用。
+protocol       = "openai-completion"
+base_url       = "https://api.deepseek.com"
+model          = "deepseek-v4-flash"
+key_env        = "DEEPSEEK_API_KEY"
+context_window = 1048576
+output_length  = 393216

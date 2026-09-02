@@ -92,8 +92,16 @@ def test_load_env_file(tmp_path, monkeypatch):
 
 
 def test_repo_model_configs_loadable():
-    """configs/models/ 下的 TOML 都能过校验。"""
-    for name in ("glm-5.3-flash", "deepseek-v4-flash"):
+    """configs/models/ 下的 TOML 都能过校验；主配置用优先协议（08）。"""
+    preferred = {
+        "glm-5.3-flash": "openai-response",
+        "deepseek-v4-flash": "anthropic",
+        "volc-deepseek-v4-flash": "openai-response",
+    }
+    for name, protocol in preferred.items():
         cfg = load_model_config(name)
-        assert cfg.protocol == "openai-completion"
+        assert cfg.protocol == protocol
         assert cfg.context_window == 1048576
+    for name in ("glm-5.3-flash-completion", "deepseek-v4-flash-completion"):
+        cfg = load_model_config(name)
+        assert cfg.protocol == "openai-completion"  # 降级配置

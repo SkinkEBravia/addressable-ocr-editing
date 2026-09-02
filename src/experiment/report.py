@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from datasetkit import ScoreError, load_dataset, select
+from datasetkit import ScoreError, load_dataset, resolve
 from evalkit import bootstrap_ci, output_ratio, paired_diff_ci
 
 __all__ = ["build_report", "write_report"]
@@ -41,18 +41,19 @@ def build_report(
     *,
     dataset_dir: Path,
     split: str,
-    granularity: str | None,
     out: Path,
     toolset_names: list[str],
     model_config_dicts: dict[str, dict],
     toolset_config_dicts: dict[str, dict],
     instruction: str | None,
+    loader_keys: list[str] | None = None,
+    meta: dict[str, str] | None = None,
 ) -> dict:
     """从对话录 + scorer 构建报告（不重打 API）。"""
     dataset = load_dataset(dataset_dir)
     tasks = {
         t.task_id: t
-        for t in select(dataset, split=split, granularity=granularity)
+        for t in resolve(dataset, split=split, keys=loader_keys, meta=meta)
     }
     scorer = dataset.scorer()
 
@@ -172,7 +173,8 @@ def build_report(
         "dataset": {
             "dir": str(Path(dataset_dir).resolve()),
             "split": split,
-            "granularity": granularity,
+            "loader_keys": loader_keys,
+            "meta": meta,
             "info": vars(dataset.info()),
         },
         "models": model_config_dicts,

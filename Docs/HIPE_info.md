@@ -57,9 +57,20 @@
 
 ## 对本项目口径的影响
 
-- **chunk 粒度（逐页）与官方可比**；doc 粒度（同源文档 10 页拼接，~14k 字符）
+- **chunk 粒度（逐页/逐单元）与官方可比**；doc 粒度（同源文档拼接）
   是自设口径，得分 = chunk 均值 + 方差。
-- 分组键必须是**源文档**（`document_id` 剥掉 `_lX_pYYY` 后缀或
-  `primary_dataset_filename` 末段），页按页码排序以 `\n` 拼接，
-  gold_units = 逐页 gold。注意：v1 实现曾误用 `document_id` 全名作分组键，
-  因其中含页码导致 doc ≡ chunk（doc 任务恒为单 chunk、cmer_var 恒 0）。
+- 分组键 = **源文档**，v2 起按子集族解析：dta19 剥 `document_id` 的
+  `_lX_pYYY` 后缀（页按页码排序）；icdar2017 从 `primary_dataset_filename`
+  解析（其 `document_id` 每行唯一，如 `icdar2017_dev_en_8_0`，doc 键形如
+  `periodical__eng_periodical-3`，chunk 按序号排序）；impresso-nzz /
+  impresso-snippets / overproof 每条即独立文档，doc ≡ chunk。
+  注意：v1 实现曾误用 `document_id` 全名作分组键，因其中含页码/行号导致
+  doc ≡ chunk（doc 任务恒为单 chunk、cmer_var 恒 0）——v2 已修。
+- task_id：chunk 为 `<subset>/<document>#<label>`（如
+  `dta19-l0/1886-eschstruth_katz#p025`、`icdar2017/periodical__eng_periodical-3#chunk_100`），
+  doc 为 `<subset>/<document>`；subset 取自 jsonl 文件名（dta19 含退化级，
+  如 `dta19-l0`）。
+- 选择接口为 loader 注册表（契约见 Design/10）：`loaders(split=...)` 的 key =
+  `<subset>/<language>/<granularity>`（如 `icdar2017/en/chunk`）；子集全语言 =
+  该子集各语言 loader 串联（组合权在调用方）；官方 `*-unmatched` 文件
+  （对齐失败行）不纳入装载。

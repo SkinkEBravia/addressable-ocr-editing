@@ -6,11 +6,11 @@
 实现可整体替换——用户自研组件、rich、纯日志均可。
 
 - `RichProgress`（默认）：rich.Live 原地刷新状态行（进度/轮次/墙钟/out tok/TPS）
-  + 最近事件行；非 TTY 退化为事件行。
+  + 最近事件行；非 TTY 退化为事件行。声明了 `delta(text)` ⇒ run 层自动切
+  流式请求，状态行显示滚动 TPS 估值（增量字符 ÷ 4，标 `~`；精确值仍以轮末
+  端点 usage 为准）——只计数，模型输出文本不进终端。
 - `NullProgress`：全空操作，库内调用缺省。
-- 流式增量显示（模型输出尾部滚动）**已搁置**：协议里不留 `delta`；
-  实现者声明了 `delta(text)` 才会被接入（run 层用 `getattr` 探测），
-  否则走非流式请求。
+- 报告器不声明 `delta` 则走非流式请求（run 层用 `getattr` 探测）。
 """
 
 from __future__ import annotations
@@ -62,9 +62,13 @@ class NullProgress:
 class RichProgress:
     """基于 rich.Live 的报告器：状态行 + 最近事件行，原地刷新不堆历史。
 
-    `tail_lines` / `force_terminal` 预留给自研实现对齐调试；本实现不使用
-    tail（流式尾部显示已搁置）。
+    声明了 `delta(text)` ⇒ run 层探测到后自动切换流式请求：状态行的 tok/s
+    变为滚动估值（增量字符数 ÷ 4，标 `~`；精确值仍以轮末端点 usage 为准）。
+    只计数不预览——模型输出文本不进终端（输出预览已明确不做）。
     """
+
+    # 估值口径：英文/代码约 4 字符 ≈ 1 token；仅作活动指示，不进报告
+    _CHARS_PER_TOKEN_EST = 4
 
     def __init__(
         self,
@@ -92,7 +96,7 @@ class RichProgress:
             _environ=environ,  # rich 内部参数（rich 15 锁定），隔离 TERM 误判
         )
         self._tty = force_terminal
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Live 渲染回调会重入（update 时持锁渲染）
         self._live: Any = None
         self._total = 0
         self._done = 0
@@ -100,6 +104,7 @@ class RichProgress:
         self._turns = 0
         self._cell_start = 0.0
         self._out_tokens = 0  # usage 累计（端点精确值）
+        self._stream_chars = 0  # 本轮流式增量字符（估值用）
         self._last_event = ""
 
     # -- 生命周期 -------------------------------------------------------------
@@ -133,17 +138,24 @@ class RichProgress:
             self._turns = 0
             self._cell_start = time.monotonic()
             self._out_tokens = 0
+            self._stream_chars = 0
             if self._tty:
                 self._refresh_locked()
             else:
                 self._stream.write(f"[start] {label}\n")
                 self._stream.flush()
 
+    def delta(self, text: str) -> None:
+        """流式观察：只计数（滚动 TPS 估值），不渲染模型输出文本。"""
+        with self._lock:
+            self._stream_chars += len(text)
+
     def turn(self, usage: Usage | None) -> None:
         with self._lock:
             self._turns += 1
             if usage is not None:
                 self._out_tokens += usage.output_tokens
+            self._stream_chars = 0  # 新轮归零
             if self._tty:
                 self._refresh_locked()
 
@@ -166,18 +178,37 @@ class RichProgress:
 
     def _status_line_locked(self) -> str:
         elapsed = time.monotonic() - self._cell_start
-        tps = self._out_tokens / elapsed if elapsed > 0 else 0.0
+        if self._out_tokens:
+            # 有轮末端点值：精确 TPS
+            tps = f"{self._out_tokens / elapsed:.1f} tok/s" if elapsed > 0 else "-"
+        elif self._stream_chars:
+            # 轮内流式增量：估值（字符 ÷ 4），只作活动指示
+            est = self._stream_chars / self._CHARS_PER_TOKEN_EST
+            tps = f"~{est / elapsed:.1f} tok/s" if elapsed > 0 else "~-"
+        else:
+            tps = "-"
         return (
             f"[{self._done}/{self._total}] {self._label} | turn {self._turns + 1} "
-            f"| {elapsed:.0f}s | {self._out_tokens} out tok | {tps:.1f} tok/s"
+            f"| {elapsed:.0f}s | {self._out_tokens} out tok | {tps}"
         )
 
     def _renderable_locked(self) -> Any:
-        from rich.console import Group
-        from rich.text import Text
+        progress = self
 
-        event = f"  最近: {self._last_event}" if self._last_event else " "
-        return Group(Text(self._status_line_locked()), Text(event))
+        class _Dynamic:
+            def __rich__(self) -> Any:
+                from rich.console import Group
+                from rich.text import Text
+
+                with progress._lock:
+                    event = (
+                        f"  最近: {progress._last_event}" if progress._last_event else " "
+                    )
+                    return Group(
+                        Text(progress._status_line_locked()), Text(event)
+                    )
+
+        return _Dynamic()
 
     def _refresh_locked(self) -> None:
         if self._live is not None:

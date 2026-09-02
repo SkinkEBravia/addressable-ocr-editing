@@ -18,16 +18,31 @@
 `dataset.py` 必须暴露四个入口：
 
 ```python
-def tasks(*, split: str,
-          granularity: str | None = None,
-          ids: list[str] | None = None,
-          languages: list[str] | None = None,
-          limit: int | None = None) -> Iterable[Task]: ...
+def loaders(*, split: str) -> dict[str, Loader]: ...  # Loader = () -> Iterable[Task]
 
 def scorer() -> Scorer: ...
 def default_instruction() -> str: ...     # 任务指令原文（如 BLOCR SYSTEM_PROMPT 逐字副本）
 def info() -> DatasetInfo: ...
 ```
+
+### loader 风格的选择接口（torch 式）
+
+数据集提供**一组具名 loader**，每个 loader 是一条独立的 Task 流；**组合权在调用方**（实验装配、unit 测试）——取子集 = 按键选 loader，全量 = `itertools.chain` 串联，`ids` / `limit` 截断在数据集之外完成：
+
+```text
+loaders(split="dev") -> {
+    "icdar2017/en/chunk":  () -> Iterable[Task],
+    "icdar2017/en/doc":    () -> Iterable[Task],
+    "dta19-l0/de/chunk":   () -> Iterable[Task],
+    ...
+}
+```
+
+- **key 即选择器**，命名方案归数据集所有，必须写入 `info().notes`（如 HIPE：`<subset>/<language>/<granularity>`）。
+- 同一 key 的 loader 多次调用产出**逐字段相同**的 Task 序列（可重放、可配对）。
+- 不同 key 的 Task 流 `task_id` 全局不撞（串联安全）。
+- loader 是零参 callable 而非直接暴露 iterable：装载时机归调用方，map-style 惰性由数据集自决。
+- 数据集内部的最小读取单位与分组规则（如 HIPE 的 chunk 原子 + doc 分组视图）是实现细节，不进入契约。
 
 ### `Task`
 
@@ -39,13 +54,6 @@ def info() -> DatasetInfo: ...
 | `input` | `str` | 待处理文本（OCR 修复任务即 OCR 原文） |
 | `reference` | `str \| None` | gold；`None` = masked，不参与出数 |
 | `meta` | `Attrs` | 语言、来源子集等，报告切片维度 |
-
-### 处理对象的选择
-
-"1 个文档还是多个"收编进 `tasks()` 参数，**调用方（实验装配、unit 测试、doc 测试）只改入口参数，不触碰文件**：
-
-- `granularity`：任务粒度。取值集与口径由各数据集自定，必须写入 `info().notes`（如 HIPE：`chunk` 与官方可比，`doc` 整页为自设口径）。
-- `ids` / `languages` / `limit`：子集选择；同一实验内对各工具配置一致（公平性，见 11）。
 
 ### `Scorer`
 
@@ -67,8 +75,7 @@ ScoreRecord = dict[str, float]            # 指标名 -> 值
 | `name` | `str` | 数据集名 |
 | `version` | `str` | 版本 |
 | `splits` | `tuple[str, ...]` | 可用 split |
-| `granularities` | `tuple[str, ...]` | 可用粒度 |
-| `notes` | `str` | 口径与合理性限定，**必须非空**——结论解释所需的限定条件成文于此，随报告引用 |
+| `notes` | `str` | 口径与合理性限定 + loader key 命名方案，**必须非空**——结论解释所需的限定条件成文于此，随报告引用 |
 
 ## 公共组件库 `evalkit`
 
@@ -91,13 +98,13 @@ ScoreRecord = dict[str, float]            # 指标名 -> 值
 ## 验收
 
 ```text
-datasets/tiny 与 datasets/hipe_2026 均通过同一份契约测试（tasks / scorer / default_instruction / info）
+datasets/tiny 与 datasets/hipe_2026 均通过同一份契约测试（loaders / scorer / default_instruction / info）
 masked（reference = None）样本在任何路径下都不会进入 score
-info().notes 非空；granularity 取值与 notes 中声明的一致
+info().notes 非空且含 loader key 命名方案；同一 key 重复调用产出一致；跨 key task_id 不撞
 ```
 
 ## 边界
 
-- 不规定存储布局、文件格式、指标集合——全在契约背后。
+- 不规定存储布局、文件格式、指标集合、loader 数量与命名——全在契约背后。
 - 契约覆盖文本进、文本出的任务；非文本处理对象（图像、多文件）需要泛化 `Task.input` / `Scorer` 类型，属后续版本，届时契约升级而非打破。
 - LLM 配置与工具配置归 [08](08-llm.md) / [09](09-tools.md)；执行与报告归 [11](11-experiment.md)。

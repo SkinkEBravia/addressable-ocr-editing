@@ -78,14 +78,20 @@ class TranscriptWriter:
         return self._path
 
     def config_hash_matches(self) -> bool:
-        """resume：已存在且 config_hash 一致 => 可跳过。"""
+        """resume：已存在、config_hash 一致且终态非 failed => 可跳过。
+
+        failed 不算完成态：重跑时必须重试（瞬时限流/超时不应被 resume 吞掉）。
+        """
         if not self._path.is_file():
             return False
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except ValueError:
             return False
-        return data.get("config_hash") == self._cfg_hash and "status" in data
+        if data.get("config_hash") != self._cfg_hash:
+            return False
+        status = data.get("status")
+        return status is not None and not str(status).startswith("failed")
 
     def write_turn(
         self, turn: TurnRecord, turns: list[TurnRecord], header: dict | None = None

@@ -1,0 +1,8 @@
+# GLM via 火山引擎（chat/completions 兼容端点）——降级配置，仅在主配置
+#（openai-response，见 glm-5.3-flash.toml）不可用时使用。
+protocol       = "openai-completion"
+base_url       = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model          = "glm-5.3-flash"
+key_env        = "VOLCENGINE_API_KEY"
+context_window = 1048576
+output_length  = 131072

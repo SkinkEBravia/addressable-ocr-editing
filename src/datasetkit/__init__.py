@@ -3,15 +3,21 @@
 对应 Docs/Design/10-datasets.md「契约」节。
 
 一个数据集 = 一个目录 + 一个 dataset.py，必须暴露四个入口：
-tasks / scorer / default_instruction / info。物理布局完全隔离在契约背后。
+loaders / scorer / default_instruction / info。物理布局完全隔离在契约背后。
+
+loader 风格的选择接口（torch 式）：数据集给出一组具名 loader
+（key 命名方案归数据集，写入 info().notes），组合权在调用方——
+resolve() 按键选取 + itertools.chain 串联 + ids/limit 截断。
 """
 
 from __future__ import annotations
 
 import importlib.util
+import itertools
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 __all__ = [
     "Task",
@@ -19,8 +25,10 @@ __all__ = [
     "ScoreRecord",
     "ScoreError",
     "Scorer",
+    "Loader",
     "ContractError",
     "load_dataset",
+    "resolve",
 ]
 
 
@@ -37,6 +45,9 @@ class Task:
 ScoreRecord = dict[str, float]
 """指标名 -> 值。指标语义归数据集，报告层只按名聚合。"""
 
+Loader = Callable[[], Iterable[Task]]
+"""零参 callable：一次调用 = 一条可重放的 Task 流。"""
+
 
 class ScoreError(Exception):
     """评分失败（如对 masked task 调用 score）。"""
@@ -51,15 +62,14 @@ class DatasetInfo:
     name: str
     version: str
     splits: tuple[str, ...]
-    granularities: tuple[str, ...]
-    notes: str  # 口径与合理性限定；必须非空
+    notes: str  # 口径与合理性限定 + loader key 命名方案；必须非空
 
 
 class ContractError(Exception):
     """dataset.py 不满足契约。"""
 
 
-_REQUIRED = ("tasks", "scorer", "default_instruction", "info")
+_REQUIRED = ("loaders", "scorer", "default_instruction", "info")
 
 
 def load_dataset(path: Path | str) -> Any:
@@ -74,6 +84,7 @@ def load_dataset(path: Path | str) -> Any:
     if spec is None or spec.loader is None:
         raise ContractError(f"无法装载数据集: {entry}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclass 字符串注解等运行时解析依赖模块注册
     spec.loader.exec_module(module)
     missing = [name for name in _REQUIRED if not callable(getattr(module, name, None))]
     if missing:
@@ -85,16 +96,42 @@ def load_dataset(path: Path | str) -> Any:
     return module
 
 
-def select(
+def resolve(
     dataset: Any,
     *,
     split: str,
-    granularity: str | None = None,
+    keys: list[str] | None = None,
+    meta: dict[str, str] | None = None,
     ids: list[str] | None = None,
-    languages: list[str] | None = None,
     limit: int | None = None,
-) -> Iterable[Task]:
-    """处理对象的选择：全部经 tasks() 参数透传，调用方不触碰文件。"""
-    return dataset.tasks(
-        split=split, granularity=granularity, ids=ids, languages=languages, limit=limit
+) -> list[Task]:
+    """处理对象的选择：按 key 选 loader（缺省全部）+ 串联，再依次经
+    meta（task.meta 等值过滤，AND）/ ids / limit 截断。
+
+    组合在装配层完成，不触碰数据集的物理布局。
+    """
+    available = dataset.loaders(split=split)
+    if keys is None:
+        selected = list(available)
+    else:
+        unknown = [k for k in keys if k not in available]
+        if unknown:
+            raise ContractError(
+                f"未知 loader key {unknown}（{dataset.info().name} 可用：{sorted(available)}）"
+            )
+        selected = list(keys)
+    tasks = list(
+        itertools.chain.from_iterable(available[k]() for k in selected)
     )
+    if meta:
+        tasks = [
+            t
+            for t in tasks
+            if all(str(t.meta.get(k)) == v for k, v in meta.items())
+        ]
+    if ids is not None:
+        wanted = set(ids)
+        tasks = [t for t in tasks if t.task_id in wanted]
+    if limit is not None:
+        tasks = tasks[:limit]
+    return tasks

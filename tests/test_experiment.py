@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from datasetkit import load_dataset, select
+from datasetkit import load_dataset
 from llm import Message, StubClient
 from experiment import (
     build_report,
@@ -53,22 +53,27 @@ def _stub() -> StubClient:
 
 
 def _answer(msgs) -> str:
-    """按请求内容给出确定性响应的假端点。"""
-    content = msgs[-1].content
-    if "Return a JSON object" in content:  # rewrite
-        if "oldSwarth" in content:
+    """按请求内容给出确定性响应的假端点。
+
+    组装口径（09 规则 1）：工具集类型看 system 消息（instruction + clause），
+    对话状态看最后一条消息（输入呈现 / 反馈）。
+    """
+    system = msgs[0].content if msgs and msgs[0].role == "system" else ""
+    last = msgs[-1].content
+    if "PATTERN_NOT_FOUND" in last or "parse error: " in last:
+        return "done()"
+    if "Return a JSON object" in system:  # rewrite
+        if "oldSwarth" in last:
             return '{"ocr_postcorrection_output": "Rich old Swarth LAND and water\\n"}'
         return '{"ocr_postcorrection_output": "the quick brown fox jumps over the lazy dog\\n"}'
-    if "PATTERN_NOT_FOUND" in content or "parse error: " in content:
-        return "done()"
-    if "<x id=" in content:  # patch 视图
-        if "oldSwarth" in content:
+    if "<x id=" in last:  # patch 视图
+        if "oldSwarth" in last:
             return 'replace(b1, "oldSwarth", "old Swarth")\nreplace(b1, "ar.d", "and")'
         return 'replace(b1, "teh", "the")'
-    if "replaced" in content or "patch applied" in content:
+    if "replaced" in last or "patch applied" in last:
         return "done()"
-    if "find_replace" in content:  # find_replace 首轮
-        if "oldSwarth" in content:
+    if "find_replace" in system:  # find_replace 首轮
+        if "oldSwarth" in last:
             return 'find_replace("oldSwarth", "old Swarth")\nfind_replace("ar.d", "and")'
         return 'find_replace("teh", "the")'
     return "done()"
@@ -92,7 +97,6 @@ def _report(out: Path) -> dict:
     report = build_report(
         dataset_dir=TINY,
         split="all",
-        granularity=None,
         out=out,
         toolset_names=["noop", "rewrite", "patch", "find_replace"],
         model_config_dicts={"stub": _MODEL},
@@ -163,6 +167,29 @@ def test_resume_skips_same_config(tmp_path: Path):
         out=out,
     )
     assert set(summary.values()) == {"resumed"}
+
+
+def test_resume_retries_failed_cells(tmp_path: Path):
+    """failed 不是完成态：瞬时限流/超时的 cell 重跑时必须重试，不能被 resume 吞掉。"""
+    out = _run(tmp_path)
+    # 把一个已完成 cell 的对话录改写成 failed 终态（模拟上次运行首轮 LLMError）
+    victim = next(
+        p for p in (out / "raw").glob("*/*.json") if p.parent.name != "messages"
+    )
+    data = json.loads(victim.read_text(encoding="utf-8"))
+    data["status"] = "failed:timeout"
+    victim.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    summary = run_experiment(
+        dataset_dir=TINY,
+        toolset_configs=_configs(),
+        client=StubClient([_answer] * 64),
+        model_config_dict=_MODEL,
+        split="all",
+        out=out,
+    )
+    retried = [k for k, v in summary.items() if v == "done"]
+    assert len(retried) == 1  # 恰好只有 failed 的那个 cell 重跑
+    assert all(v == "resumed" for k, v in summary.items() if k not in retried)
 
 
 def test_resume_key_includes_config(tmp_path: Path):

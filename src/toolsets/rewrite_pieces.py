@@ -23,7 +23,7 @@ from toolsets.core import (
     ToolResult,
     TurnRecord,
     _sum_usage,
-    format_input,
+    build_initial_messages,
 )
 
 __all__ = ["RewritePiecesToolSet"]
@@ -79,16 +79,9 @@ class RewritePiecesToolSet:
                 status = "budget_exceeded"
                 outputs.append(unit)  # 未处理的单元回退原文
                 continue
-            messages = [
-                Message(
-                    "user",
-                    instruction
-                    + "\n\n"
-                    + REWRITE_CLAUSE
-                    + "\n\n"
-                    + format_input(unit, task.meta),
-                )
-            ]
+            messages = build_initial_messages(
+                instruction, REWRITE_CLAUSE, unit, task.meta
+            )
             completion = client.complete(messages, on_delta=on_delta)
             record = TurnRecord(len(turns), tuple(messages), completion, ())
             turns.append(record)

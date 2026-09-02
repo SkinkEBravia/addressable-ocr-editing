@@ -1,8 +1,10 @@
-# DeepSeek（OpenAI 兼容端点；见 Docs/LLM-providers.md）
+# DeepSeek（Anthropic 兼容端点；优先协议——见 Docs/Design/08-llm.md /
+# Docs/LLM-providers.md）。completion 降级见 *-completion.toml。
 # 采样参数留空 = 不下发，用端点默认。
-protocol       = "openai-completion"
-base_url       = "https://api.deepseek.com"
+# anthropic 协议强制 max_tokens：output_length 在此协议下会真实下发。
+protocol       = "anthropic"
+base_url       = "https://api.deepseek.com/anthropic"
 model          = "deepseek-v4-flash"
 key_env        = "DEEPSEEK_API_KEY"
 context_window = 1048576   # 1024k（信息性，暂不使用）
-output_length  = 393216    # 384k（信息性，暂不使用）
+output_length  = 65536     # anthropic 协议下作为 max_tokens 下发（384k 上限内取工作值）

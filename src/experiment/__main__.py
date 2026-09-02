@@ -3,8 +3,8 @@
 对应 Docs/Design/11-experiment.md「运行配置」节。
 
     python -m experiment --dataset <dir> --toolsets a,b --model m \
-        --split dev [--granularity doc] [--ids ...] [--languages de,en] \
-        [--limit N] [--instruction <路径>] --out runs/<name>
+        --split dev [--loaders icdar2017/en/doc,dta19-l0/de/chunk] \
+        [--ids ...] [--limit N] [--instruction <路径>] --out runs/<name>
     python -m experiment --out runs/<name> --replay
     python -m experiment --out runs/<name> --report-only
 """
@@ -29,6 +29,20 @@ def _split_csv(value: str | None) -> list[str] | None:
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
+def _parse_ids_from(pairs: list[str] | None) -> dict[str, str] | None:
+    """--ids-from meta:key=value（可重复，AND）→ meta 等值过滤 dict。"""
+    if not pairs:
+        return None
+    meta: dict[str, str] = {}
+    for pair in pairs:
+        prefix, sep, rest = pair.partition(":")
+        key, eq, value = rest.partition("=")
+        if prefix != "meta" or not sep or not eq or not key.strip():
+            raise SystemExit(f"error: --ids-from 需要 meta:key=value 形式，got {pair!r}")
+        meta[key.strip()] = value.strip()
+    return meta
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="experiment",
@@ -38,9 +52,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--toolsets", help="工具配置名，逗号分隔（configs/toolsets/<name>.toml）")
     p.add_argument("--model", help="模型配置名（configs/models/<name>.toml）；同一实验单一模型")
     p.add_argument("--split", help="数据集 split（如 dev / train / test）")
-    p.add_argument("--granularity", default=None, help="任务粒度（数据集自定，如 unit / doc）")
+    p.add_argument(
+        "--loaders",
+        default=None,
+        help="loader key 列表，逗号分隔（如 icdar2017/en/doc）；缺省 = 该 split 全部 loader 串联",
+    )
+    p.add_argument(
+        "--ids-from",
+        action="append",
+        default=None,
+        help="meta 等值过滤：meta:key=value，可重复（AND）；如 meta:document=periodical__eng_periodical-3",
+    )
     p.add_argument("--ids", default=None, help="task_id 列表，逗号分隔")
-    p.add_argument("--languages", default=None, help="语言过滤，逗号分隔")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--instruction", default=None, help="instruction 模板路径（覆盖数据集默认）")
     p.add_argument("--out", required=True, help="输出目录 runs/<name>")
@@ -48,7 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--reporter",
         default=None,
-        help="运行时报告器：rich（默认）/ null / module:Class（自研组件入口）",
+        help="运行时报告器：rich（默认，流式 TPS）/ null / module:Class（自研组件入口）",
     )
     p.add_argument("--replay", action="store_true", help="磁带重放后处理（不重打 API）")
     p.add_argument("--report-only", action="store_true", help="只重建报告（不重跑）")
@@ -96,9 +119,9 @@ def main(argv: list[str] | None = None) -> int:
             client=client,
             model_config_dict=model_config.as_dict(),
             split=args.split,
-            granularity=args.granularity,
+            loader_keys=_split_csv(args.loaders),
+            meta_filter=_parse_ids_from(args.ids_from),
             ids=_split_csv(args.ids),
-            languages=_split_csv(args.languages),
             limit=args.limit,
             instruction=instruction,
             out=out,
@@ -125,7 +148,8 @@ def _emit_report(args, out: Path, model_config=None, toolset_configs=None, instr
         toolsets = old["toolsets"]
         dataset_dir = old["dataset"]["dir"]
         split = old["dataset"]["split"]
-        granularity = old["dataset"]["granularity"]
+        loader_keys = old["dataset"].get("loader_keys")
+        meta_filter = old["dataset"].get("meta")
         names = list(toolsets)
         instruction_src = None
     else:
@@ -133,13 +157,15 @@ def _emit_report(args, out: Path, model_config=None, toolset_configs=None, instr
         toolsets = {c.name: c.as_dict() for c in toolset_configs}
         dataset_dir = args.dataset
         split = args.split
-        granularity = args.granularity
+        loader_keys = _split_csv(args.loaders)
+        meta_filter = _parse_ids_from(args.ids_from)
         names = [c.name for c in toolset_configs]
         instruction_src = instruction
     report = build_report(
         dataset_dir=Path(dataset_dir),
         split=split,
-        granularity=granularity,
+        loader_keys=loader_keys,
+        meta=meta_filter,
         out=out,
         toolset_names=names,
         model_config_dicts=models,

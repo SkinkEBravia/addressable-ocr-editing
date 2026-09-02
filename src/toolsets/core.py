@@ -4,8 +4,8 @@
 
 - 工具配置 = 工具集 + 方言 + 提示词条款 + 终止预算。
 - 工具报错与 ParseError 走同一通道：作为 feedback 进下一轮，无独立重试机制。
-- 提示词组装：instruction（属数据集）+ prompt_clause（属工具集）+ 输入，
-  顺序固定、逐字拼接。
+- 提示词组装：system 消息 = instruction（属数据集）+ prompt_clause（属工具集），
+  逐字拼接；首条 user 消息 = 输入呈现。
 - agent 对块的定位一律用 AgentBlockId（见 06/07）；工具集不得把 BlockKey
   泄漏进对话。
 """
@@ -33,6 +33,7 @@ __all__ = [
     "run_loop",
     "run_toolset",
     "format_input",
+    "build_initial_messages",
 ]
 
 
@@ -137,6 +138,21 @@ def format_input(task_input: str, task_meta: dict) -> str:
     return f"--- INPUT{tag} ---\n{task_input}\n--- END OF INPUT ---"
 
 
+def build_initial_messages(
+    instruction: str,
+    prompt_clause: str,
+    presented_input: str,
+    task_meta: dict,
+) -> list[Message]:
+    """提示词组装（09「Loop」规则 1）：system = instruction + prompt_clause
+    （顺序固定、逐字拼接）；首条 user = 输入呈现。loop 与自定义 runner
+    （rewrite_pieces 等）共用本函数，组装口径全局唯一。"""
+    return [
+        Message("system", instruction + "\n\n" + prompt_clause),
+        Message("user", format_input(presented_input, task_meta)),
+    ]
+
+
 def _sum_usage(turns: list[TurnRecord]) -> Usage | None:
     """各轮 usage 合计（含失败轮）；任一轮缺失则整体 None。"""
     total_in = total_out = 0
@@ -182,16 +198,12 @@ def run_loop(
             output=task_input, status="done", turns=(), total_usage=Usage(0, 0, 0)
         )
 
-    messages = [
-        Message(
-            "user",
-            instruction
-            + "\n\n"
-            + toolset.prompt_clause
-            + "\n\n"
-            + format_input(toolset.present_input(task_input, ctx), task_meta),
-        )
-    ]
+    messages = build_initial_messages(
+        instruction,
+        toolset.prompt_clause,
+        toolset.present_input(task_input, ctx),
+        task_meta,
+    )
     turns: list[TurnRecord] = []
     status = "budget_exceeded"  # 正常退出路径会覆盖
 

@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from datasetkit import load_dataset, select
+from datasetkit import load_dataset, resolve
 from llm import LLMClient, LLMError, load_env_file
 from toolsets import LoopResult, run_toolset
 
@@ -43,9 +43,9 @@ def run_experiment(
     client: LLMClient,
     model_config_dict: dict,
     split: str,
-    granularity: str | None = None,
+    loader_keys: list[str] | None = None,
+    meta_filter: dict[str, str] | None = None,
     ids: list[str] | None = None,
-    languages: list[str] | None = None,
     limit: int | None = None,
     instruction: str | None = None,
     out: Path,
@@ -61,13 +61,8 @@ def run_experiment(
     progress = progress or NullProgress()
     dataset = load_dataset(dataset_dir)
     tasks = list(
-        select(
-            dataset,
-            split=split,
-            granularity=granularity,
-            ids=ids,
-            languages=languages,
-            limit=limit,
+        resolve(
+            dataset, split=split, keys=loader_keys, meta=meta_filter, ids=ids, limit=limit
         )
     )
     instruction = instruction if instruction is not None else dataset.default_instruction()
@@ -75,9 +70,9 @@ def run_experiment(
     dataset_params = {
         "dataset_dir": str(Path(dataset_dir).resolve()),
         "split": split,
-        "granularity": granularity,
+        "loader_keys": loader_keys,
+        "meta": meta_filter,
         "ids": ids,
-        "languages": languages,
         "limit": limit,
     }
 
@@ -131,11 +126,11 @@ def run_experiment(
         except LLMError as exc:
             result = LoopResult(
                 output=task.input,  # 失败回退原文
-                status="failed",
+                status=f"failed:{exc.kind}",  # 失败类别落盘（可审计、resume 会重试）
                 turns=(),
                 total_usage=None,
             )
-            status = f"failed:{exc.kind}"  # 事件行带失败类别
+            status = result.status
         writer.finalize(result, list(result.turns))
         summary[str((task.task_id, cfg.name))] = result.status
         progress.end_cell(label, status, result.total_usage, time.monotonic() - t0)

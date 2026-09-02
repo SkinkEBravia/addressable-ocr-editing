@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from datasetkit import load_dataset, select
+from datasetkit import load_dataset, resolve
 from toolsets import Done, ToolParseError
 
 from experiment.config import build_toolset, toolset_config_from_dict
@@ -61,7 +61,12 @@ def replay(out: Path, on_progress: Callable[[str], None] | None = None) -> dict:
     dataset = load_dataset(ds["dir"])
     tasks = {
         t.task_id: t
-        for t in select(dataset, split=ds["split"], granularity=ds.get("granularity"))
+        for t in resolve(
+            dataset,
+            split=ds["split"],
+            keys=ds.get("loader_keys"),
+            meta=ds.get("meta"),
+        )
     }
 
     changed: list[str] = []

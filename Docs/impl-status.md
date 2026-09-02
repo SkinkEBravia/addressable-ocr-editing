@@ -10,20 +10,26 @@
 
 **方言 `fn`**：一行一调用、全位置参数、JSON 字符串、裸标识符（`HEAD`）、`#` 注释、行号定位、`ParseError` 带行号；受控 JSON 解析，无 eval。
 
-**LLM（08 对应）**：`LLMClient.complete(prompt, system=)` 单发签名；仅 deepseek 适配器（openai-completion 协议）；`Usage` 无 `reasoning_tokens`。
+**LLM（08 对应）**：`complete(messages)` 消息列表签名；三协议适配器齐备
+（openai-response / anthropic / openai-completion，优先级见 08），golden 测试覆盖；
+`Usage` 含 `reasoning_tokens`；anthropic 口径 input_tokens = 端点三字段求和
+（含 cache_read，与 OpenAI 系 prompt_tokens 对齐）。
 
-**实验（旧 08 对应）**：`experiment_app` 四通道单发 + 重试（无多轮 loop）；TOML 臂配置、replay、report 已有。
+**工具与 loop（09 对应）**：loop + ToolSet 契约 + Budget；标准集
+noop / rewrite / rewrite_pieces / patch / find_replace；组装规则 =
+system（instruction + prompt_clause）+ user（输入呈现），共用
+`build_initial_messages`；错误即反馈。
+
+**数据集（10 对应）**：loader 注册表契约（`<subset>/<language>/<granularity>`），
+组合权在调用方（datasetkit.resolve = 选 key + chain + ids/limit）；
+tiny 与 hipe_2026 同过一份契约测试。
+
+**实验（11 对应）**：`--loaders` 选择；对话录逐轮增量落盘；resume 键含配置哈希；
+报告含 token 构成；RichProgress 流式 TPS（delta 只计数不预览）。
 
 ## 缺口（重写要解决什么）
 
 | 设计 | 现状 | 缺口 |
 |---|---|---|
-| 08 `complete(messages)` | `complete(prompt, system=)` | 消息列表签名；`reasoning_tokens`；`ModelConfig` 装载；另两个协议适配器 |
-| 09 loop / 工具集 | 四通道硬编码 runner | loop、`ToolSet` 契约、`Budget`；`find_replace` 配置；错误即反馈（替代重试预算） |
-| 10 dataset 契约 | `datasets.py` 直读 HIPE jsonl | `dataset.py` 契约、`datasets/tiny/`、`evalkit`、scorer 归数据集 |
-| 11 对话录 | raw 任务完成后才落盘；resume 键 = (样本, 臂名) | 逐轮增量落盘；resume 键含配置哈希；报告加 token 构成 |
 | 07 MCP | 无 | `doc serve`（Streamable HTTP） |
-
-## 重写顺序建议
-
-llm 签名升级 → loop + 工具集（四通道迁入）→ dataset.py 契约（tiny + hipe）→ 对话录增量落盘与报告 → MCP / 外部 harness（v2）。
+| 09 外部 harness | 无 | codex 式工具集 / run_external（v2） |

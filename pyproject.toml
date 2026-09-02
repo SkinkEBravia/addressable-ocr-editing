@@ -26,7 +26,10 @@ packages = ["src/sourceio", "src/partition", "src/ir", "src/reconstruction", "sr
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "--basetemp=.pytest-tmp"  # 本机 Temp 目录被锁（shit.md #10）
+addopts = "--basetemp=.pytest-tmp -m 'not live'"  # 本机 Temp 目录被锁（shit.md #10）；live 需手动 -m live
+markers = [
+    "live: 真实 API 请求冒烟（默认排除，用 -m live 启用）",
+]
 
 [tool.uv.workspace]
 members = [

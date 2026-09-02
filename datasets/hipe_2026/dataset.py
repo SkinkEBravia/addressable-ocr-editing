@@ -3,25 +3,34 @@
 契约见 Docs/Design/10-datasets.md。物理布局（related_source/ 下的官方
 jsonl 目录树）完全隔离在本文件内部；OCR 与 gold 在官方记录内分字段存放。
 
-- split: train / dev / test / masked-test（masked 的 reference=None，不出数）。
-- granularity: chunk（逐转写单元，与官方可比）| doc（同 document_id 拼接，
-  自设口径，不与官方排名可比）。doc 的得分 = chunk 均值 + 方差（复用逐条
-  评分方法，见 scorer）。
-- scorer: 官方归一化（hipe_ocrepair_scorer.norm）+ jiwer 字符对齐 +
-  官方 MER 公式的逐条 cMER；聚合口径（fold/bootstrap CI）由 score_all 给出。
-  doc 粒度按 DOC_SEPARATOR 把 prediction 拆回 chunk 与 gold 逐块对齐
-  （单 chunk 直接评；多 chunk 分隔符结构对不上则回退整篇口径，
-  chunks_aligned=0 标记）。
-- default_instruction: BLOCR SYSTEM_PROMPT 的指令体逐字副本（instruction.md）。
+最小读取单位 = chunk（一行 jsonl = 一页/一条转写单元）。loader 注册表覆盖
+子集 × 语言 × 粒度，key 形如 `<subset>/<language>/<granularity>`：
+
+    icdar2017/en/chunk   icdar2017/en/doc
+    dta19-l0/de/chunk    dta19-l0/de/doc   ...
+
+- chunk：逐转写单元，与官方可比；
+- doc：同源文档的 chunk 按页/序号拼接（自设口径，不与官方排名可比）。
+  doc 分组键 = 源文档：dta19 剥 document_id 的 `_lX_pYYY` 后缀；
+  icdar2017 从 primary_dataset_filename 解析（其 document_id 每行唯一）；
+  其余子集（impresso-nzz / impresso-snippets / overproof）每条即独立文档，
+  doc ≡ chunk。doc 得分 = chunk 均值 + 方差（见 scorer）。
+- subset 取自 jsonl 文件名（dta19 含退化级，如 dta19-l0）；language 取自目录。
+
+split: train / dev / test / masked-test（masked 的 reference=None，不出数；
+官方 `*-unmatched` 文件为对齐失败行，不纳入装载）。
+default_instruction: BLOCR SYSTEM_PROMPT 的指令体逐字副本（instruction.md）。
 """
 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Iterable
 
-from datasetkit import DatasetInfo, ScoreError, Task
+from datasetkit import DatasetInfo, Loader, ScoreError, Task
 
 _DIR = Path(__file__).resolve().parent
 _DATA_ROOT = (
@@ -31,135 +40,158 @@ _DATA_ROOT = (
 DOC_SEPARATOR = "\n"
 """granularity='doc' 的单元拼接分隔符。"""
 
-__all__ = ["tasks", "scorer", "score_all", "default_instruction", "info"]
+__all__ = ["loaders", "scorer", "score_all", "default_instruction", "info"]
 
 _SPLITS = ("train", "dev", "test", "masked-test")
-_GRANULARITIES = ("chunk", "doc")
 
 
 # ---------------------------------------------------------------------------
-# 装载（物理布局隔离于此）
+# 装载（物理布局隔离于此）：最小读取单位 = chunk
 # ---------------------------------------------------------------------------
 
-def _split_files(split: str, languages: list[str] | None) -> list[Path]:
-    files = sorted(_DATA_ROOT.glob(f"*/*/*_{split}_*.jsonl"))
-    if languages is not None:
-        files = [p for p in files if p.parent.name in languages]
-    return files
+@dataclass(frozen=True)
+class _Chunk:
+    """一行 jsonl = 一个 chunk。doc 粒度是 _Chunk 序列上的分组视图。"""
+
+    subset: str  # dta19-l0 / icdar2017 / ...
+    language: str  # de / en / fr
+    document: str  # 源文档键（subset 内唯一）
+    label: str  # chunk 在文档内的标识（p025 / chunk_100 / document_id）
+    order: tuple  # 文档内排序键
+    ocr: str
+    gold: str | None  # None = masked
+    meta: dict = field(default_factory=dict)
 
 
-def _read_rows(path: Path) -> list[tuple[int, dict]]:
-    rows: list[tuple[int, dict]] = []
+def _split_files(split: str) -> list[Path]:
+    # `*_{split}_*.jsonl` 不匹配 `dev-unmatched`（分隔符不同）：对齐失败行不纳入
+    return sorted(_DATA_ROOT.glob(f"*/*/*_{split}_*.jsonl"))
+
+
+def _subset_of(path: Path) -> str:
+    # hipe-ocrepair-bench_v0.9_<subset>_<ver>_<split>_<lang>.jsonl（subset 无下划线）
+    return path.stem.split("_")[2]
+
+
+_DTA19_ID = re.compile(r"(.+)_l\d+_p(\d+)$")
+_ICDAR_DOC = re.compile(r"icdar2017__(?:train|test)__(?:en|fr|de)__(.+)__chunk_")
+_ICDAR_CHUNK = re.compile(r"__chunk_(\d+)(?:-([a-z]))?__GT\.txt$")
+
+
+def _document_key(subset: str, document_id: str, filename: str, lineno: int) -> tuple[str, str, tuple]:
+    """（document, label, order）：源文档分组键 + chunk 标识 + 文档内排序键。"""
+    if subset.startswith("dta19"):
+        m = _DTA19_ID.fullmatch(document_id)
+        if m:
+            return m.group(1), f"p{m.group(2)}", (int(m.group(2)),)
+    elif subset == "icdar2017":
+        base = filename.rsplit("/", 1)[-1]
+        doc = _ICDAR_DOC.search(base)
+        chunk = _ICDAR_CHUNK.search(base)
+        if doc and chunk:
+            return (
+                doc.group(1),
+                f"chunk_{chunk.group(1)}{'-' + chunk.group(2) if chunk.group(2) else ''}",
+                (int(chunk.group(1)), chunk.group(2) or ""),
+            )
+    # impresso-nzz / impresso-snippets / overproof：每条即独立文档（doc ≡ chunk）
+    return document_id, document_id, (lineno,)
+
+
+def _iter_chunks(path: Path, masked: bool) -> Iterable[_Chunk]:
+    subset = _subset_of(path)
+    language = path.parent.name
     with path.open("r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, start=1):
             line = line.strip()
-            if line:
-                rows.append((lineno, json.loads(line)))
-    return rows
+            if not line:
+                continue
+            row = json.loads(line)
+            gold = (row.get("ground_truth") or {}).get("transcription_unit")
+            if not masked and not gold:
+                continue  # gold 为空的行（对齐失败/masked 混入）不出数：跳过
+            meta = dict(row.get("document_metadata") or {})
+            document_id = str(meta.get("document_id", f"row{lineno}"))
+            document, label, order = _document_key(
+                subset, document_id, str(meta.get("primary_dataset_filename") or ""), lineno
+            )
+            yield _Chunk(
+                subset=subset,
+                language=language,
+                document=document,
+                label=label,
+                order=order,
+                ocr=row["ocr_hypothesis"]["transcription_unit"],
+                gold=None if masked else gold,
+                meta={
+                    **meta,
+                    "subset": subset,
+                    "language": language,
+                    "document": document,
+                    "source_file": path.name,
+                    "row": lineno,
+                },
+            )
 
 
-def _meta_of(row: dict) -> dict[str, Any]:
-    return dict(row.get("document_metadata") or {})
-
-
-def _row_to_chunk_task(path: Path, lineno: int, row: dict, masked: bool) -> Task:
-    meta = _meta_of(row)
-    document_id = str(meta.get("document_id", f"row{lineno}"))
-    meta = {**meta, "source_file": path.name, "row": lineno}
+def _chunk_task(chunk: _Chunk) -> Task:
     return Task(
-        task_id=f"{document_id}#{lineno}",
-        input=row["ocr_hypothesis"]["transcription_unit"],
-        reference=None if masked else row["ground_truth"]["transcription_unit"],
-        meta=meta,
+        task_id=f"{chunk.subset}/{chunk.document}#{chunk.label}",
+        input=chunk.ocr,
+        reference=chunk.gold,
+        meta=chunk.meta,
     )
 
 
-def _group_to_doc_task(path: Path, group: list[tuple[int, dict]], masked: bool) -> Task:
-    meta = _meta_of(group[0][1])
-    document_id = str(meta.get("document_id", f"row{group[0][0]}"))
-    ocr_units = [r["ocr_hypothesis"]["transcription_unit"] for _, r in group]
-    gold_units = [r["ground_truth"]["transcription_unit"] for _, r in group]
+def _doc_task(chunks: list[_Chunk]) -> Task:
+    """同源文档的 chunk 按 order 拼接；meta 带 gold_units / unit_boundaries 供评分与切回。"""
+    chunks = sorted(chunks, key=lambda c: c.order)
+    first = chunks[0]
     boundaries: list[int] = []
     offset = 0
-    for unit in ocr_units:
+    for c in chunks:
         boundaries.append(offset)
-        offset += len(unit) + len(DOC_SEPARATOR)
+        offset += len(c.ocr) + len(DOC_SEPARATOR)
     meta = {
-        **meta,
-        "source_file": path.name,
+        **{k: v for k, v in first.meta.items() if k != "row"},
+        "n_chunks": len(chunks),
         "unit_boundaries": boundaries,  # OCR 侧各单元起始偏移（供 rewrite_pieces 切回）
-        "gold_units": gold_units,  # gold 侧逐单元（供 doc 评分拆回 chunk）
+        "gold_units": [c.gold or "" for c in chunks],  # gold 侧逐单元（供 doc 评分拆回）
     }
     return Task(
-        task_id=document_id,
-        input=DOC_SEPARATOR.join(ocr_units),
-        reference=None if masked else DOC_SEPARATOR.join(gold_units),
+        task_id=f"{first.subset}/{first.document}",
+        input=DOC_SEPARATOR.join(c.ocr for c in chunks),
+        reference=None if first.gold is None else DOC_SEPARATOR.join(c.gold or "" for c in chunks),
         meta=meta,
     )
 
 
-def _load_file(
-    path: Path, granularity: str, masked: bool
-) -> Iterable[Task]:
-    rows = _read_rows(path)
-    if not masked:
-        # masked 行（gold 为空串）不出数：逐行跳过
-        rows = [
-            (ln, r)
-            for ln, r in rows
-            if (r.get("ground_truth") or {}).get("transcription_unit")
-        ]
+def _tasks_from_file(path: Path, granularity: str, masked: bool) -> list[Task]:
+    chunks = list(_iter_chunks(path, masked))
     if granularity == "chunk":
-        for lineno, row in rows:
-            yield _row_to_chunk_task(path, lineno, row, masked)
-        return
-    # doc：连续相同 document_id 的行按文件内顺序拼接
-    group: list[tuple[int, dict]] = []
-    prev_id: Any = object()
-
-    def flush() -> Task | None:
-        nonlocal group
-        if not group:
-            return None
-        task = _group_to_doc_task(path, group, masked)
-        group = []
-        return task
-
-    for lineno, row in rows:
-        document_id = _meta_of(row).get("document_id")
-        if group and document_id != prev_id:
-            task = flush()
-            if task is not None:
-                yield task
-        group.append((lineno, row))
-        prev_id = document_id
-    task = flush()
-    if task is not None:
-        yield task
+        return [_chunk_task(c) for c in chunks]
+    groups: dict[tuple[str, str], list[_Chunk]] = {}
+    for c in chunks:
+        groups.setdefault((c.subset, c.document), []).append(c)
+    return [_doc_task(g) for _, g in sorted(groups.items())]
 
 
-def tasks(
-    *,
-    split: str,
-    granularity: str | None = None,
-    ids: list[str] | None = None,
-    languages: list[str] | None = None,
-    limit: int | None = None,
-) -> list[Task]:
+# ---------------------------------------------------------------------------
+# 契约入口
+# ---------------------------------------------------------------------------
+
+def loaders(*, split: str) -> dict[str, Loader]:
+    """loader 注册表：`<subset>/<language>/<granularity>` -> 零参 Task 流。"""
     if split not in _SPLITS:
         raise ValueError(f"未知 split {split!r}（{_SPLITS}）")
-    granularity = granularity or "chunk"
-    if granularity not in _GRANULARITIES:
-        raise ValueError(f"未知 granularity {granularity!r}（{_GRANULARITIES}）")
     masked = split == "masked-test"
-    out: list[Task] = []
-    for path in _split_files(split, languages):
-        for task in _load_file(path, granularity, masked):
-            if ids is not None and task.task_id not in ids:
-                continue
-            out.append(task)
-    if limit is not None:
-        out = out[:limit]
+    out: dict[str, Loader] = {}
+    for path in _split_files(split):
+        key_prefix = f"{_subset_of(path)}/{path.parent.name}"
+        for granularity in ("chunk", "doc"):
+            out[f"{key_prefix}/{granularity}"] = (
+                lambda p=path, g=granularity, m=masked: _tasks_from_file(p, g, m)
+            )
     return out
 
 
@@ -171,7 +203,7 @@ def _record(task: Task, output: str) -> dict:
     meta = {
         k: v
         for k, v in task.meta.items()
-        if k not in ("unit_boundaries", "gold_units")
+        if k not in ("unit_boundaries", "gold_units", "n_chunks")
     }
     meta["document_id"] = task.task_id
     return {
@@ -198,7 +230,7 @@ class _Scorer:
         gold_units = task.meta.get("gold_units")
         if gold_units:  # doc 粒度：得分 = chunk 均值 + 方差（复用逐条评分）
             if len(gold_units) == 1:
-                # 单 chunk（HIPE 数据的常态）：无需拆分，直接逐条评分
+                # 单 chunk（doc ≡ chunk 的子集常态）：无需拆分，直接逐条评分
                 return {
                     "cmer": _cmer(gold_units[0], prediction),
                     "cmer_var": 0.0,
@@ -270,10 +302,15 @@ def info() -> DatasetInfo:
         name="hipe_2026",
         version="0.9.5",
         splits=_SPLITS,
-        granularities=_GRANULARITIES,
         notes=(
-            "口径：chunk 粒度（逐转写单元）与官方成绩可比；doc 粒度（同 document_id "
-            "拼接）为自设场景，不与官方排名可比，doc 得分 = chunk 均值 + 方差。"
+            "loader key 命名：`<subset>/<language>/<granularity>`"
+            "（如 icdar2017/en/chunk、dta19-l0/de/doc）。"
+            "口径：chunk 粒度（逐转写单元）与官方成绩可比；doc 粒度（同源文档 "
+            "chunk 按页/序号拼接）为自设场景，不与官方排名可比，doc 得分 = chunk "
+            "均值 + 方差。doc 分组键 = 源文档：dta19 剥 document_id 的 _lX_pYYY "
+            "后缀；icdar2017 从 primary_dataset_filename 解析（其 document_id "
+            "每行唯一）；impresso-nzz / impresso-snippets / overproof 每条即独立"
+            "文档，doc ≡ chunk。官方 *-unmatched 文件（对齐失败行）不纳入装载。"
             "评分前归一化抹除换行/标点/大小写差异，字节级保真优势"
             "不计分。no-correction 基线很强，noop 是必设锚点。masked-test 的 GT 为空，"
             "不出数。"

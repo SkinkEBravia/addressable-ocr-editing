@@ -29,10 +29,12 @@ def test_rewrite_single_turn_json_extraction(tmp_path: Path):
     assert r.status == "done"
     assert r.output == "fixed"
     assert len(r.turns) == 1
-    # 提示词组装：instruction + clause + 输入，顺序固定
-    first = stub.calls[0][0].content
-    assert first.startswith("INSTR\n\n")
-    assert "--- INPUT" in first and "bad" in first
+    # 提示词组装（09 规则 1）：system = instruction + clause；user = 输入呈现
+    system, user = stub.calls[0]
+    assert system.role == "system"
+    assert system.content.startswith("INSTR\n\n") and ts.prompt_clause in system.content
+    assert user.role == "user"
+    assert "--- INPUT" in user.content and "bad" in user.content
 
 
 def test_patch_error_feedback_then_done(tmp_path: Path):
