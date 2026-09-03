@@ -7,14 +7,16 @@
 
 - `RichProgress`（默认）：rich.Live 原地刷新状态行（进度/轮次/墙钟/out tok/TPS）
   + 最近事件行；非 TTY 退化为事件行。声明了 `delta(text)`：run 层在流式开启时
-  把增量喂给它——状态行显示滚动 TPS 估值（增量字符 ÷ 4，标 `~`；精确值仍以
-  轮末端点 usage 为准）。
+  把增量喂给它——状态行的 TPS 是**时间窗滚动估值**（窗内增量字符 ÷ 4，标 `~`，
+  窗长 15s），停滞时改显无增量秒数（区分「慢」与「死了」）；out tok 计数
+  仍取轮末端点 usage。
 - `NullProgress`：全空操作，库内调用缺省。
 - 流式与否是显式运行参数（run_experiment 的 stream），报告器只是订阅者。
 """
 
 from __future__ import annotations
 
+import collections
 import importlib
 import sys
 import threading
@@ -24,6 +26,9 @@ from typing import Any, Protocol, TextIO, runtime_checkable
 from agent import Session
 
 __all__ = ["ProgressReporter", "NullProgress", "RichProgress", "build_reporter"]
+
+_TPS_WINDOW_S = 15.0
+"""TPS 估值的时间窗（秒）：只统计窗内的流式增量。"""
 
 
 @runtime_checkable
@@ -100,7 +105,8 @@ class RichProgress:
         self._turns = 0
         self._cell_start = 0.0
         self._out_tokens = 0  # usage 累计（端点精确值）
-        self._stream_chars = 0  # 本轮流式增量字符（估值用）
+        self._delta_events: collections.deque = collections.deque()  # (t, 字符数)
+        self._last_delta: float | None = None  # 最近一次增量的时刻（停滞诊断）
         self._last_event = ""
 
     # -- 生命周期 -------------------------------------------------------------
@@ -134,7 +140,8 @@ class RichProgress:
             self._turns = 0
             self._cell_start = time.monotonic()
             self._out_tokens = 0
-            self._stream_chars = 0
+            self._delta_events.clear()
+            self._last_delta = None
             if self._tty:
                 self._refresh_locked()
             else:
@@ -142,9 +149,11 @@ class RichProgress:
                 self._stream.flush()
 
     def delta(self, text: str) -> None:
-        """流式观察：只计数（滚动 TPS 估值），不渲染模型输出文本。"""
+        """流式观察：只计数（进时间窗，滚动 TPS 估值），不渲染模型输出文本。"""
         with self._lock:
-            self._stream_chars += len(text)
+            now = time.monotonic()
+            self._delta_events.append((now, len(text)))
+            self._last_delta = now
 
     def turn(self, session: Session) -> None:
         with self._lock:
@@ -152,7 +161,6 @@ class RichProgress:
             usage = session.usage
             if usage is not None:
                 self._out_tokens = usage.output_tokens
-            self._stream_chars = 0  # 新轮归零
             if self._tty:
                 self._refresh_locked()
 
@@ -177,20 +185,30 @@ class RichProgress:
 
     # -- 渲染 ---------------------------------------------------------------
 
+    def _windowed_tps_locked(self, now: float) -> float | None:
+        """时间窗内的滚动 TPS 估值（字符 ÷ 4）；窗内无增量返回 None。"""
+        cutoff = now - _TPS_WINDOW_S
+        while self._delta_events and self._delta_events[0][0] < cutoff:
+            self._delta_events.popleft()
+        if not self._delta_events:
+            return None
+        chars = sum(c for _, c in self._delta_events)
+        span = max(min(_TPS_WINDOW_S, now - self._delta_events[0][0]), 1.0)
+        return chars / self._CHARS_PER_TOKEN_EST / span
+
     def _status_line_locked(self) -> str:
-        elapsed = time.monotonic() - self._cell_start
-        if self._out_tokens:
-            # 有轮末端点值：精确 TPS
-            tps = f"{self._out_tokens / elapsed:.1f} tok/s" if elapsed > 0 else "-"
-        elif self._stream_chars:
-            # 轮内流式增量：估值（字符 ÷ 4），只作活动指示
-            est = self._stream_chars / self._CHARS_PER_TOKEN_EST
-            tps = f"~{est / elapsed:.1f} tok/s" if elapsed > 0 else "~-"
+        now = time.monotonic()
+        elapsed = now - self._cell_start
+        tps = self._windowed_tps_locked(now)
+        if tps is not None:
+            rate = f"~{tps:.1f} tok/s/{_TPS_WINDOW_S:.0f}s窗"
+        elif self._last_delta is None:
+            rate = "- tok/s"  # 本 cell 尚无增量（未流式或刚启动）
         else:
-            tps = "-"
+            rate = f"~0 tok/s（{now - self._last_delta:.0f}s 无增量）"  # 停滞指示
         return (
             f"[{self._done}/{self._total}] {self._label} | turn {self._turns + 1} "
-            f"| {elapsed:.0f}s | {self._out_tokens} out tok | {tps}"
+            f"| {elapsed:.0f}s | {self._out_tokens} out tok | {rate}"
         )
 
     def _renderable_locked(self) -> Any:
