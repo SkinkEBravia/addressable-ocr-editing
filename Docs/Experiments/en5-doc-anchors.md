@@ -65,7 +65,7 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 - **行号锚对模型最友好**：swe_edit 第二轮就一把 11 条 edit 全部生效、第三轮收工，72k out token 达到与单发 patch 同级质量，是反馈臂里最省钱的。
 - 字符串锚同质量但 2.3 倍 token（163.6k），且后 4 轮平台期+轻微回退（过度编辑）。
 - 两个锚点首轮都「先交一次学费」（parse 失败 / 无效替换）再靠反馈自愈——这正是多轮口径的意义；单轮下这些错误全是零变更。
-- 结论：**swe_edit ≈ find_replace ≈ 单发 patch（质量），swe_edit 成本最优**；与 patch（块 id 锚）的多轮对比待 en5-doc-patch8t 补齐后并表。
+- 结论：**swe_edit ≈ find_replace ≈ 单发 patch（质量），swe_edit 成本最优**；块 id 锚的多轮对照已补齐（en5-doc-patch8t：patch 1 轮 0.0312 / 67.9k，三锚点双优居首）。
 
 ## 资产与备注
 
