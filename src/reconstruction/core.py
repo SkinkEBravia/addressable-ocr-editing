@@ -14,28 +14,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ir import SOURCE_DOC_ATTR_KEY, DocumentSnapshot
 from sourceio import SourceText
 
 __all__ = ["reconstruct"]
 
 _FALLBACK_ENCODING = "utf-8"
-
-
-def _source_meta(snapshot: DocumentSnapshot) -> tuple[str, bytes]:
-    """从 doc_attrs 的保留键取回 (encoding, bom)；缺失或非法时回退默认值。"""
-    raw: Any = snapshot.doc_attrs.get(SOURCE_DOC_ATTR_KEY)
-    if not isinstance(raw, dict):
-        return _FALLBACK_ENCODING, b""
-
-    encoding_raw: Any = raw.get("encoding")
-    bom_raw: Any = raw.get("bom")
-
-    encoding = encoding_raw if isinstance(encoding_raw, str) and encoding_raw else _FALLBACK_ENCODING
-    bom = bytes.fromhex(bom_raw) if isinstance(bom_raw, str) else b""
-    return encoding, bom
 
 
 def reconstruct(snapshot: DocumentSnapshot) -> SourceText:
@@ -45,5 +29,9 @@ def reconstruct(snapshot: DocumentSnapshot) -> SourceText:
     - encoding / bom 取自 ``doc_attrs["source"]``；缺失时回退 utf-8 无 BOM
     """
     text = "".join(b.content for b in snapshot.blocks)
-    encoding, bom = _source_meta(snapshot)
-    return SourceText(text=text, encoding=encoding, bom=bom)
+    meta = snapshot.doc_attrs.get(SOURCE_DOC_ATTR_KEY)
+    if isinstance(meta, dict) and isinstance(enc := meta.get("encoding"), str) and enc:
+        raw_bom = meta.get("bom")
+        bom = bytes.fromhex(raw_bom) if isinstance(raw_bom, str) else b""
+        return SourceText(text=text, encoding=enc, bom=bom)
+    return SourceText(text=text, encoding=_FALLBACK_ENCODING, bom=b"")

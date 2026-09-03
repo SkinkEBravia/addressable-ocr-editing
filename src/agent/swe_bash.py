@@ -109,12 +109,17 @@ class GitBashBackend:
     def __init__(self, bash_path: str | None = None) -> None:
         self._bash = (
             bash_path
-            or shutil.which("bash")
             or (
                 r"C:\Program Files\Git\bin\bash.exe"
                 if Path(r"C:\Program Files\Git\bin\bash.exe").is_file()
                 else None
             )
+            or (
+                r"C:\Program Files\Git\usr\bin\bash.exe"
+                if Path(r"C:\Program Files\Git\usr\bin\bash.exe").is_file()
+                else None
+            )
+            or shutil.which("bash")
         )
         if self._bash is None:
             raise RuntimeError("找不到 bash（需要 Git Bash 或 DockerBackend）")

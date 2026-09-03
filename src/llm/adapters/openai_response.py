@@ -70,21 +70,19 @@ def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
 
 def _usage_from_dict(usage: object) -> Usage | None:
     """端点 usage 字段 -> Usage；缺失/畸形为 None（不做本地估算）。"""
-    if not isinstance(usage, dict):
-        return None
-    input_tokens = usage.get("input_tokens")
-    output_tokens = usage.get("output_tokens")
-    if not isinstance(input_tokens, int) or not isinstance(output_tokens, int):
-        return None
-    reasoning = None
-    details = usage.get("output_tokens_details")
-    if isinstance(details, dict) and isinstance(details.get("reasoning_tokens"), int):
-        reasoning = details["reasoning_tokens"]
-    return Usage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        reasoning_tokens=reasoning,
-    )
+    match usage:
+        case {"input_tokens": int(in_tok), "output_tokens": int(out_tok), **rest} if (
+            not isinstance(in_tok, bool) and not isinstance(out_tok, bool)
+        ):
+            details = rest.get("output_tokens_details")
+            reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else None
+            return Usage(
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                reasoning_tokens=reasoning if isinstance(reasoning, int) and not isinstance(reasoning, bool) else None,
+            )
+        case _:
+            return None
 
 
 def _text_from_output(output: object) -> str | None:
@@ -101,18 +99,16 @@ def _text_from_output(output: object) -> str | None:
                 message="响应缺少 output 数组",
             )
         )
-    parts: list[str] = []
-    for item in output:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        for part in item.get("content") or []:
-            if isinstance(part, dict) and part.get("type") == "output_text":
-                text = part.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-    if not parts:
-        return None
-    return "".join(parts)
+    parts = [
+        text
+        for item in output
+        if isinstance(item, dict) and item.get("type") == "message"
+        for part in item.get("content") or ()
+        if isinstance(part, dict)
+        and part.get("type") == "output_text"
+        and isinstance(text := part.get("text"), str)
+    ]
+    return "".join(parts) if parts else None
 
 
 def _failed_event_error(obj: dict, *, attempts: int) -> Exception:

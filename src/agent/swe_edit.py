@@ -167,32 +167,18 @@ class SweEditToolSet:
 
 def _parse_edit_args(args_text: str) -> tuple[int, int, str]:
     """解析 `start, end, "text"`（受控解析：两个整数 + 一个 JSON 字符串）。"""
-    decoder = json.JSONDecoder()
-    pos, n = 0, len(args_text)
-    ints: list[int] = []
-    while len(ints) < 2:
-        while pos < n and args_text[pos] in " \t":
-            pos += 1
-        m = re.compile(r"\d+").match(args_text, pos)
-        if m is None:
-            raise ToolParseError(f"expected integer argument, got {args_text[pos:]!r}")
-        ints.append(int(m.group(0)))
-        pos = m.end()
-        while pos < n and args_text[pos] in " \t":
-            pos += 1
-        if pos >= n or args_text[pos] != ",":
-            raise ToolParseError("expected ',' between arguments")
-        pos += 1
-    while pos < n and args_text[pos] in " \t":
-        pos += 1
     try:
-        text, pos = decoder.raw_decode(args_text, pos)
+        parsed = json.loads(f"[{args_text}]")
     except json.JSONDecodeError as exc:
         raise ToolParseError(f"invalid JSON string: {exc.msg}") from exc
-    if not isinstance(text, str):
-        raise ToolParseError(f"third argument must be a JSON string, got {text!r}")
-    while pos < n and args_text[pos] in " \t":
-        pos += 1
-    if pos < n:
-        raise ToolParseError("edit takes exactly 3 arguments")
-    return ints[0], ints[1], text
+    match parsed:
+        case [int(start), int(end), str(text)] if not isinstance(start, bool) and not isinstance(end, bool):
+            return start, end, text
+        case [*args] if len(args) != 3:
+            raise ToolParseError("edit takes exactly 3 arguments")
+        case [start, _, _] if not isinstance(start, int) or isinstance(start, bool):
+            raise ToolParseError(f"expected integer argument, got {start!r}")
+        case [_, end, _] if not isinstance(end, int) or isinstance(end, bool):
+            raise ToolParseError(f"expected integer argument, got {end!r}")
+        case [_, _, text]:
+            raise ToolParseError(f"third argument must be a JSON string, got {text!r}")

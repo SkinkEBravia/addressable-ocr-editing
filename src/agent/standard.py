@@ -88,16 +88,12 @@ def extract_rewrite_text(text: str) -> str:
         if lines and lines[-1].strip().startswith("```"):
             lines = lines[:-1]
         candidate = "\n".join(lines).strip()
-    obj = None
     try:
-        obj = json.loads(candidate)
+        obj, _ = json.JSONDecoder().raw_decode(candidate)
+        if isinstance(obj, dict) and isinstance(out := obj.get("ocr_postcorrection_output"), str):
+            return out
     except ValueError:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(candidate)  # 首个 JSON 值，尾部忽略
-        except ValueError:
-            return text
-    if isinstance(obj, dict) and isinstance(obj.get("ocr_postcorrection_output"), str):
-        return obj["ocr_postcorrection_output"]
+        pass
     return text
 
 
@@ -221,28 +217,16 @@ class FindReplaceToolSet:
 
 def _parse_two_strings(args_text: str) -> tuple[str, str]:
     """解析两个 JSON 字符串参数（受控解析，无 eval）。"""
-    decoder = json.JSONDecoder()
-    pos = 0
-    values: list[str] = []
-    n = len(args_text)
-    while len(values) < 2:
-        while pos < n and args_text[pos] in " \t":
-            pos += 1
-        try:
-            value, pos = decoder.raw_decode(args_text, pos)
-        except json.JSONDecodeError as exc:
-            raise ToolParseError(f"invalid JSON: {exc.msg}") from exc
-        if not isinstance(value, str):
-            raise ToolParseError(f"argument must be a JSON string, got {value!r}")
-        values.append(value)
-        while pos < n and args_text[pos] in " \t":
-            pos += 1
-        if len(values) < 2:
-            if pos >= n or args_text[pos] != ",":
-                raise ToolParseError("expected ',' between arguments")
-            pos += 1
-    while pos < n and args_text[pos] in " \t":
-        pos += 1
-    if pos < n:
-        raise ToolParseError("find_replace takes exactly 2 arguments")
-    return values[0], values[1]
+    try:
+        parsed = json.loads(f"[{args_text}]")
+    except json.JSONDecodeError as exc:
+        raise ToolParseError(f"invalid JSON: {exc.msg}") from exc
+    match parsed:
+        case [str(first), str(second)]:
+            return first, second
+        case [*args] if len(args) != 2:
+            raise ToolParseError("find_replace takes exactly 2 arguments")
+        case [first, _] if not isinstance(first, str):
+            raise ToolParseError(f"argument must be a JSON string, got {first!r}")
+        case [_, second]:
+            raise ToolParseError(f"argument must be a JSON string, got {second!r}")

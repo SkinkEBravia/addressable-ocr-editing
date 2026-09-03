@@ -75,18 +75,14 @@ def birth(source: SourceLike, result: PartitionResultLike) -> DocumentSnapshot:
         "bom": bytes(source.bom).hex(),
     }
 
-    blocks: list[Block] = []
-    cursor = 1
-    for draft in drafts:
-        blocks.append(
-            Block(key=f"b{cursor}", content=draft.content, attrs=dict(draft.attrs))
-        )
-        cursor += 1
-
+    blocks = tuple(
+        Block(key=f"b{i}", content=d.content, attrs=dict(d.attrs))
+        for i, d in enumerate(drafts, start=1)
+    )
     snapshot = DocumentSnapshot(
         id="",
-        blocks=tuple(blocks),
+        blocks=blocks,
         doc_attrs=doc_attrs,
-        key_cursor=cursor,
+        key_cursor=len(drafts) + 1,
     )
     return replace(snapshot, id=snapshot_id(snapshot))

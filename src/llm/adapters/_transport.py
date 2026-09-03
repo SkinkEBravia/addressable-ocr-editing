@@ -56,43 +56,44 @@ class Retryable(Exception):
 
 def raise_for_status(response: httpx.Response, *, attempts: int) -> None:
     """HTTP 状态分类：2xx 放行；429/5xx 进重试通道；401/403 auth；其余 rejected。"""
-    status = response.status_code
-    if 200 <= status < 300:
-        return
-    if status == 429:
-        raise Retryable(
-            "限流",
-            kind="rate_limit",
-            status=status,
-            retry_after=response.headers.get("Retry-After"),
-        )
-    if status >= 500:
-        raise Retryable(
-            "服务不可用",
-            kind="server",
-            status=status,
-            retry_after=response.headers.get("Retry-After"),
-        )
-    if status in (401, 403):
-        raise LLMError(
-            Failure(
-                stage="llm",
-                kind="auth",
-                message="认证失败（不可重试）",
-                http_status=status,
-                attempts=attempts,
+    match response.status_code:
+        case s if 200 <= s < 300:
+            return
+        case 429:
+            raise Retryable(
+                "限流",
+                kind="rate_limit",
+                status=429,
+                retry_after=response.headers.get("Retry-After"),
             )
-        )
-    raise LLMError(
-        Failure(
-            stage="llm",
-            kind="rejected",
-            message=f"请求被拒绝（HTTP {status}，不可重试）",
-            http_status=status,
-            attempts=attempts,
-            detail={"body_excerpt": response.text[:_BODY_EXCERPT]},
-        )
-    )
+        case s if s >= 500:
+            raise Retryable(
+                "服务不可用",
+                kind="server",
+                status=s,
+                retry_after=response.headers.get("Retry-After"),
+            )
+        case 401 | 403 as s:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="auth",
+                    message="认证失败（不可重试）",
+                    http_status=s,
+                    attempts=attempts,
+                )
+            )
+        case s:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="rejected",
+                    message=f"请求被拒绝（HTTP {s}，不可重试）",
+                    http_status=s,
+                    attempts=attempts,
+                    detail={"body_excerpt": response.text[:_BODY_EXCERPT]},
+                )
+            )
 
 
 def call_with_retries(
@@ -108,25 +109,15 @@ def call_with_retries(
         attempts += 1
         try:
             return fn(attempts)
-        except httpx.TimeoutException as exc:
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
             if attempts > config.max_transport_retries:
+                prefix = "超时" if isinstance(exc, httpx.TimeoutException) else "网络错误"
+                detail = f": {exc}" if isinstance(exc, httpx.TransportError) else ""
                 raise LLMError(
                     Failure(
                         stage="llm",
                         kind="timeout",
-                        message=f"超时：{type(exc).__name__}",
-                        attempts=attempts,
-                        elapsed_s=time.monotonic() - t0,
-                    )
-                ) from exc
-            backoff(attempts)
-        except httpx.TransportError as exc:
-            if attempts > config.max_transport_retries:
-                raise LLMError(
-                    Failure(
-                        stage="llm",
-                        kind="timeout",
-                        message=f"网络错误：{type(exc).__name__}: {exc}",
+                        message=f"{prefix}：{type(exc).__name__}{detail}",
                         attempts=attempts,
                         elapsed_s=time.monotonic() - t0,
                     )

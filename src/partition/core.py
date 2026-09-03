@@ -79,18 +79,12 @@ def partition_lines(source: TextSource) -> PartitionResult:
     - doc_attrs：``{"partition": "lines"}``。
     - 空文本 -> 空 blocks。
     """
-    text = source.text
-    lines = text.splitlines(keepends=True)
-    starts: list[int] = []
+    blocks: list[BlockDraft] = []
     offset = 0
-    for line in lines:
-        starts.append(offset)
+    for n, line in enumerate(source.text.splitlines(keepends=True)):
+        blocks.append(BlockDraft(content=line, attrs={"start": offset, "line": n}))
         offset += len(line)
-    blocks = tuple(
-        BlockDraft(content=line, attrs={"start": start, "line": n})
-        for n, (line, start) in enumerate(zip(lines, starts, strict=True))
-    )
-    return PartitionResult(blocks=blocks, doc_attrs={"partition": "lines"})
+    return PartitionResult(blocks=tuple(blocks), doc_attrs={"partition": "lines"})
 
 
 def to_json(result: PartitionResult) -> str:

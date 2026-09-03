@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 from pathlib import Path, PureWindowsPath
@@ -139,39 +140,38 @@ def build_report(
 
     # 配对比较：每对工具配置，同 task 配对
     paired: dict[str, Any] = {}
-    for i, a in enumerate(toolset_names):
-        for b in toolset_names[i + 1 :]:
-            common = [
-                t
-                for t in per_sample.get(a, {})
-                if t in per_sample.get(b, {})
-                and per_sample[a][t].get("score")
-                and per_sample[b][t].get("score")
-            ]
-            if not common:
-                continue
-            entry: dict[str, Any] = {}
-            ratios = [
-                output_ratio(
-                    _usage_obj(per_sample[a][t]["usage"]),
-                    _usage_obj(per_sample[b][t]["usage"]),
+    for a, b in itertools.combinations(toolset_names, 2):
+        common = [
+            t
+            for t in per_sample.get(a, {})
+            if t in per_sample.get(b, {})
+            and per_sample[a][t].get("score")
+            and per_sample[b][t].get("score")
+        ]
+        if not common:
+            continue
+        entry: dict[str, Any] = {}
+        ratios = [
+            output_ratio(
+                _usage_obj(per_sample[a][t]["usage"]),
+                _usage_obj(per_sample[b][t]["usage"]),
+            )
+            for t in common
+        ]
+        ratios = [r for r in ratios if r is not None]
+        if ratios:
+            mean, lo, hi = bootstrap_ci(ratios)
+            entry["output_ratio"] = {"mean": mean, "lo": lo, "hi": hi}
+        for metric in sorted(metric_names):
+            va = [per_sample[a][t]["score"].get(metric) for t in common]
+            vb = [per_sample[b][t]["score"].get(metric) for t in common]
+            pairs = [(x, y) for x, y in zip(va, vb) if x is not None and y is not None]
+            if pairs:
+                mean, lo, hi = paired_diff_ci(
+                    [x for x, _ in pairs], [y for _, y in pairs]
                 )
-                for t in common
-            ]
-            ratios = [r for r in ratios if r is not None]
-            if ratios:
-                mean, lo, hi = bootstrap_ci(ratios)
-                entry["output_ratio"] = {"mean": mean, "lo": lo, "hi": hi}
-            for metric in sorted(metric_names):
-                va = [per_sample[a][t]["score"].get(metric) for t in common]
-                vb = [per_sample[b][t]["score"].get(metric) for t in common]
-                pairs = [(x, y) for x, y in zip(va, vb) if x is not None and y is not None]
-                if pairs:
-                    mean, lo, hi = paired_diff_ci(
-                        [x for x, _ in pairs], [y for _, y in pairs]
-                    )
-                    entry[f"delta_{metric}"] = {"mean": mean, "lo": lo, "hi": hi}
-            paired[f"{a} vs {b}"] = entry
+                entry[f"delta_{metric}"] = {"mean": mean, "lo": lo, "hi": hi}
+        paired[f"{a} vs {b}"] = entry
 
     # 数据集聚合口径（若数据集提供 score_all）
     official: dict[str, Any] = {}

@@ -96,37 +96,36 @@ def _parse_completion(response: httpx.Response, *, attempts: int) -> Completion:
                 attempts=attempts,
             )
         )
-    choices = data.get("choices")
-    try:
-        text = choices[0]["message"]["content"]  # type: ignore[index]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(
-            Failure(
-                stage="llm",
-                kind="protocol_mismatch",
-                message="响应缺少 choices[0].message.content",
-                attempts=attempts,
+    match data.get("choices"):
+        case [{"message": {"content": str(text)}}, *_] if text:
+            return Completion(text=text, usage=_usage_from_dict(data.get("usage")), raw=data)
+        case [{"message": {"content": str()}}, *_]:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="incomplete",
+                    message="响应 content 为空文本",
+                    attempts=attempts,
+                )
             )
-        ) from exc
-    if not isinstance(text, str):
-        raise LLMError(
-            Failure(
-                stage="llm",
-                kind="protocol_mismatch",
-                message="响应 content 不是字符串",
-                attempts=attempts,
+        case [{"message": {"content": not_str}}, *_]:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="响应 content 不是字符串",
+                    attempts=attempts,
+                )
             )
-        )
-    if not text:
-        raise LLMError(
-            Failure(
-                stage="llm",
-                kind="incomplete",
-                message="响应 content 为空文本",
-                attempts=attempts,
+        case _:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="响应缺少 choices[0].message.content",
+                    attempts=attempts,
+                )
             )
-        )
-    return Completion(text=text, usage=_usage_from_dict(data.get("usage")), raw=data)
 
 
 class OpenAICompletionClient:

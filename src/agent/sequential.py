@@ -38,16 +38,11 @@ DOC_SEPARATOR = "\n"
 
 def _split_units(text: str, boundaries: Any) -> tuple[str, ...]:
     """按 unit_boundaries（各单元起始偏移）切回单元；无则整体为单单元。"""
-    if not boundaries or not isinstance(boundaries, (list, tuple)) or len(boundaries) < 2:
+    if not isinstance(boundaries, (list, tuple)) or len(boundaries) < 2:
         return (text,)
-    units: list[str] = []
-    for i, start in enumerate(boundaries):
-        if i + 1 < len(boundaries):
-            end = boundaries[i + 1] - len(DOC_SEPARATOR)
-        else:
-            end = len(text)
-        units.append(text[start:end])
-    return tuple(units)
+    sep_len = len(DOC_SEPARATOR)
+    ends = [b - sep_len for b in boundaries[1:]] + [len(text)]
+    return tuple(text[s:e] for s, e in zip(boundaries, ends))
 
 
 SEQ_REWRITE_CLAUSE = """\

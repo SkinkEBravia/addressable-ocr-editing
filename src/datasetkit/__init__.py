@@ -111,15 +111,14 @@ def resolve(
     组合在装配层完成，不触碰数据集的物理布局。
     """
     available = dataset.loaders(split=split)
-    if keys is None:
-        selected = list(available)
-    else:
-        unknown = [k for k in keys if k not in available]
-        if unknown:
+    if keys is not None:
+        if unknown := [k for k in keys if k not in available]:
             raise ContractError(
                 f"未知 loader key {unknown}（{dataset.info().name} 可用：{sorted(available)}）"
             )
-        selected = list(keys)
+        selected = keys
+    else:
+        selected = list(available)
     tasks = list(
         itertools.chain.from_iterable(available[k]() for k in selected)
     )
