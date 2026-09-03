@@ -81,7 +81,7 @@ class Failure:                                       # 三通道之「失败通�
 
 - 工具集另声明 `name: str` 与 `uses_llm: bool`（noop 为 False：零轮迭代，`extract` 恒等回原文）。
 - 方言 = 文本格式 + 解析器，可替换点同 [07](07-agent-api.md#patch-方言)：换方言只换 `parse`。
-- `Done` = 模型自判完成，标记形式由各方言定义（如独立一行 `done()`）。
+- `Done` = 模型自判完成。标记形式：`done()`（或 `done`）——可单独一行，**也可作为消息最后一行**（先按序执行前面的调用，再由工具返回 `finish=True` 收束）；出现在中间则判方言错误。
 - `ToolResult = { ok: bool, feedback: str, finish: bool = False }`；`feedback` 原样作为 user 消息进入下一轮——**工具报错即对话反馈**，无独立重试机制。`finish=True` = 工具侧宣告对话完成（顺序任务的自然终止，如逐单元修复的末单元）：loop 在本轮落盘后以 `done` 收束，不再追加 feedback。
 - 工具集构造运行环境：`make_tool_state(task_input, task_meta, workdir) -> dict`（loop 在 Session 开始时调用一次）。
 - **agent 对块的定位一律用 `AgentBlockId`**（见 [06](06-view.md#agentidstrategy)）：工具参数、prompt_clause 示例、feedback 中的块标识都是 Agent 侧 id；工具集与 loop 不得把 `BlockKey` 泄漏进对话。

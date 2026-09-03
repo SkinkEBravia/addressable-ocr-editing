@@ -93,8 +93,7 @@ replace "recorn mended" "recommended"
 To run a command, output one function call per line:
 bash("<your shell command here>")
 The command string uses JSON syntax (escape newlines as \\n and quotes as \\"). Commands are non-interactive (no vim/python REPL); each runs with a 30s timeout.
-When the text is fully corrected, output a single line:
-done()
+When the text is fully corrected, output done() (alone, or as the last line after your final commands).
 Output ONLY the calls. No explanation, no preamble, no markdown fences. If no correction is needed, output done() immediately."""
 
 
@@ -179,16 +178,22 @@ class SweBashToolSet:
 
     def parse(self, text: str) -> "tuple[ToolCall, ...] | Done":
         calls: list[ToolCall] = []
-        for lineno, raw in enumerate(text.split("\n"), start=1):
+        lines = text.split("\n")
+        # 末尾标记：最后一行是 done()/done ⇒ 先执行前面的调用再收束
+        trailing_done = False
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[-1].strip() in ("done()", "done"):
+            trailing_done = True
+            lines.pop()
+        for lineno, raw in enumerate(lines, start=1):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            if line == "done()":
-                if calls:
-                    raise ToolParseError(
-                        f"line {lineno}: done() must be the only content of a message"
-                    )
-                return DONE
+            if line in ("done()", "done"):
+                raise ToolParseError(
+                    f"line {lineno}: done() 只能出现在消息最后一行"
+                )
             m = re.match(r'bash\s*\((.*)\)\s*\Z', line, re.DOTALL)
             if m is None:
                 raise ToolParseError(
@@ -203,11 +208,15 @@ class SweBashToolSet:
             if not isinstance(command, str):
                 raise ToolParseError(f"line {lineno}: bash argument must be a JSON string")
             calls.append(ToolCall("bash", command))
+        if trailing_done:
+            calls.append(ToolCall("done"))
         if not calls:
             raise ToolParseError("empty response; emit bash(...) or done()")
         return tuple(calls)
 
     def invoke(self, call: ToolCall, tool_state: dict) -> ToolResult:
+        if call.name == "done":
+            return ToolResult(True, "", finish=True)
         if call.name != "bash":
             return ToolResult(False, f"unknown tool: {call.name}")
         code, out = self._backend.run(

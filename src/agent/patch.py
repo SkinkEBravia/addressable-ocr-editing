@@ -55,8 +55,7 @@ _OP_BULLETS = {
 
 _CLAUSE_TAIL = """\
 ids must be the ids shown in the annotations (or HEAD, only as an anchor); bare ids and quoted ids are equivalent (`b1` and "b1" both work). Strings and attrs objects use JSON syntax. Blank lines and lines starting with # are ignored.
-After a successful patch you receive the affected blocks re-rendered; you may then emit another patch. When the text is fully corrected, output a single line:
-done()
+After a successful patch you receive the affected blocks re-rendered; you may then emit another patch. When the text is fully corrected, output done() (alone, or as the last line after your patch).
 To re-fetch the current annotated view, output a single line:
 view()
 Otherwise output ONLY the patch. No explanation, no preamble, no markdown fences. If no correction is needed, output done() immediately."""
@@ -147,13 +146,27 @@ class PatchToolSet:
         stripped = text.strip()
         if not stripped:
             raise ToolParseError("empty response; emit a patch, view(), or done()")
-        if stripped == "done()":
+        if stripped in ("done()", "done"):
             return DONE
         if stripped == "view()":
             return (ToolCall("view"),)
-        return (ToolCall("run_patch", text),)
+        # 末尾标记：patch 最后一行是 done()/done ⇒ 先应用 patch 再收束
+        trailing_done = False
+        lines = stripped.split("\n")
+        if lines[-1].strip() in ("done()", "done"):
+            trailing_done = True
+            lines.pop()
+            stripped = "\n".join(lines).strip()
+        calls: list[ToolCall] = []
+        if stripped:
+            calls.append(ToolCall("run_patch", stripped))
+        if trailing_done:
+            calls.append(ToolCall("done"))
+        return tuple(calls)
 
     def invoke(self, call: ToolCall, tool_state: dict) -> ToolResult:
+        if call.name == "done":
+            return ToolResult(True, "", finish=True)
         if call.name == "view":
             payload = self._render(tool_state)
             tool_state["payload"] = payload

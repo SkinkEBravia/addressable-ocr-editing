@@ -345,3 +345,62 @@ def test_swe_bash_replace_script(tmp_path):
         "replace zz Z", cwd=state["workdir"], env=state["env"], timeout=30
     )
     assert code2 != 0 and "PATTERN_NOT_FOUND" in out2
+
+
+# ---------------------------------------------------------------- 末尾 done 标记
+
+
+def test_trailing_done_executes_calls_then_finishes(tmp_path):
+    """done() 在最后一行：前面的调用照常执行，然后 done 收束（一轮完成）。"""
+    session, client = run_one(
+        FindReplaceToolSet(),
+        ['find_replace("wrld", "world")\ndone()'],
+        tmp_path,
+        budget=Budget(max_turns=4),
+    )
+    assert session.status == "done"
+    assert len(session.turns) == 1
+    assert session.output == "hello world"
+    assert session.turns[0].results[-1].feedback == ""
+    assert session.turns[0].results[-1].ok is True
+
+
+def test_trailing_done_bare_form(tmp_path):
+    """bare `done`（无括号）在最后一行同样算完成。"""
+    session, _ = run_one(
+        FindReplaceToolSet(),
+        ['find_replace("wrld", "world")\ndone'],
+        tmp_path,
+        budget=Budget(max_turns=4),
+    )
+    assert session.status == "done"
+    assert session.output == "hello world"
+
+
+def test_done_in_middle_still_parse_error(tmp_path):
+    """done() 出现在中间仍是方言错误（对话通道）。"""
+    session, _ = run_one(
+        FindReplaceToolSet(),
+        ['done()\nfind_replace("wrld", "world")', "done()"],
+        tmp_path,
+        budget=Budget(max_turns=4),
+    )
+    assert session.turns[0].parse_error is not None
+    assert session.status == "done"
+    assert session.output == TASK_INPUT  # 替换在作废的第 0 轮里，未生效
+
+
+def test_patch_trailing_done(tmp_path):
+    from agent.patch import PatchToolSet
+
+    ts = PatchToolSet()
+    client = StubClient(['replace(b1, "wrld", "world")\ndone()'])
+    session, messages = start_session(
+        ts, label="patch", task_id="t1", task_input=TASK_INPUT,
+        task_meta={}, instruction=INST, workdir=tmp_path / "work",
+        config_hash="h", budget=Budget(max_turns=4),
+    )
+    run_session(client, ts, session, messages, fallback_text=TASK_INPUT)
+    assert session.status == "done"
+    assert session.output == "hello world"
+    assert len(session.turns) == 1

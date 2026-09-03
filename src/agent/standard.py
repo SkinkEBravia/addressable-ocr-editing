@@ -136,7 +136,7 @@ FIND_REPLACE_CLAUSE = """\
 You edit the text with tool calls, one function call per line:
 - read() — return the current full text
 - find_replace("old", "new") — replace EVERY occurrence of "old" in the whole text with "new" (replace-all). "old" must be copied VERBATIM from the text; if it does not occur exactly, the call fails. Keep "old" as SHORT as possible while still unambiguous — every character you quote costs output tokens
-- done() — finish; the current text becomes the output
+- done() — finish; the current text becomes the output. May stand alone or be the last line after your calls
 
 Strings use JSON syntax. Output ONLY the calls. No explanation, no preamble, no markdown fences. If no correction is needed, output done() immediately."""
 
@@ -161,16 +161,22 @@ class FindReplaceToolSet:
 
     def parse(self, text: str) -> "tuple[ToolCall, ...] | Done":
         calls: list[ToolCall] = []
-        for lineno, raw in enumerate(text.split("\n"), start=1):
+        lines = text.split("\n")
+        # 末尾标记：最后一行是 done()/done ⇒ 先执行前面的调用再收束
+        trailing_done = False
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[-1].strip() in ("done()", "done"):
+            trailing_done = True
+            lines.pop()
+        for lineno, raw in enumerate(lines, start=1):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            if line == "done()":
-                if calls:
-                    raise ToolParseError(
-                        f"line {lineno}: done() must be the only content of a message"
-                    )
-                return DONE
+            if line in ("done()", "done"):
+                raise ToolParseError(
+                    f"line {lineno}: done() 只能出现在消息最后一行"
+                )
             m = _CALL_RE.match(line)
             if m is None:
                 raise ToolParseError(f"line {lineno}: expected `name(args)`, got {line!r}")
@@ -180,11 +186,15 @@ class FindReplaceToolSet:
                     f"line {lineno}: unknown tool {name!r} (known: {', '.join(_KNOWN)}, done)"
                 )
             calls.append(ToolCall(name, args_text.strip()))
+        if trailing_done:
+            calls.append(ToolCall("done"))
         if not calls:
             raise ToolParseError("empty response; emit tool calls or done()")
         return tuple(calls)
 
     def invoke(self, call: ToolCall, tool_state: dict) -> ToolResult:
+        if call.name == "done":
+            return ToolResult(True, "", finish=True)
         if call.name == "read":
             return ToolResult(True, tool_state["text"])
         if call.name == "find_replace":

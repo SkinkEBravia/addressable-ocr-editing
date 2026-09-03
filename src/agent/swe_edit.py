@@ -36,7 +36,7 @@ You are working directly in the command line with a special interface. The inter
 COMMANDS (one function call per line):
 - view() — print the text with line numbers
 - edit(<start_line>, <end_line>, "<text>") — replaces lines <start_line> through <end_line> (INCLUSIVE, 1-based) with the given text. All of the replacement text will be entered literally, so make sure your whitespace is exact. The replacement may span multiple lines (use \\n in the JSON string). Line numbers are the ones shown by view(). Keep the replaced range as SMALL as possible while covering the error — every line you quote costs output tokens. After an edit, line numbers below the edited region shift; re-view() if you need fresh numbers
-- done() — finish; the current text becomes the output
+- done() — finish; the current text becomes the output. May stand alone or be the last line after your calls
 
 Numbers are plain integers; the replacement text uses JSON string syntax. Output ONLY the calls. No explanation, no preamble, no markdown fences. If no correction is needed, output done() immediately."""
 
@@ -66,16 +66,22 @@ class SweEditToolSet:
 
     def parse(self, text: str) -> "tuple[ToolCall, ...] | Done":
         calls: list[ToolCall] = []
-        for lineno, raw in enumerate(text.split("\n"), start=1):
+        lines = text.split("\n")
+        # 末尾标记：最后一行是 done()/done ⇒ 先执行前面的调用再收束
+        trailing_done = False
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[-1].strip() in ("done()", "done"):
+            trailing_done = True
+            lines.pop()
+        for lineno, raw in enumerate(lines, start=1):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            if line == "done()":
-                if calls:
-                    raise ToolParseError(
-                        f"line {lineno}: done() must be the only content of a message"
-                    )
-                return DONE
+            if line in ("done()", "done"):
+                raise ToolParseError(
+                    f"line {lineno}: done() 只能出现在消息最后一行"
+                )
             m = _CALL_RE.match(line)
             if m is None:
                 raise ToolParseError(f"line {lineno}: expected `name(args)`, got {line!r}")
@@ -85,11 +91,15 @@ class SweEditToolSet:
                     f"line {lineno}: unknown tool {name!r} (known: {', '.join(_KNOWN)}, done)"
                 )
             calls.append(ToolCall(name, args_text.strip()))
+        if trailing_done:
+            calls.append(ToolCall("done"))
         if not calls:
             raise ToolParseError("empty response; emit tool calls or done()")
         return tuple(calls)
 
     def invoke(self, call: ToolCall, tool_state: dict) -> ToolResult:
+        if call.name == "done":
+            return ToolResult(True, "", finish=True)
         if call.name == "view":
             return ToolResult(True, self._view(tool_state))
         if call.name == "edit":
