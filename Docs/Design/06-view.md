@@ -57,6 +57,13 @@ Annotator = (agent_id: AgentBlockId, content: str) -> str
 
 策略对 attrs 的依赖构成与 partition 实现的**配套关系**（如 md partition ↔ md ID 策略）。配套不由本模块约束：IR 不感知策略，partition 不感知 ID。配对由装配层在选择"用哪个 partition + 用哪个策略"时完成。
 
+已交付的配套：
+
+| partition | id 策略 | 标注形式 | 用途 |
+|---|---|---|---|
+| 任意 | `blockkey_as_is`（AgentBlockId = BlockKey） | `xml_ish`（`<x id="bN"\>`） | patch 操作面（07 默认栈） |
+| `partition_lines`（每行一块） | `line_number`（AgentBlockId = 行号，1 起，位置性） | `cat_n`（`N: content`） | 行号锚操作面（swe_edit） |
+
 ## 接口
 
 ```python

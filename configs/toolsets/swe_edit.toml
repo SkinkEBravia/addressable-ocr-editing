@@ -1,0 +1,4 @@
+# swe_edit：经典 SWE-agent v0.7 行号锚编辑的复刻（view + edit(start,end,text)）。
+# 锚点类型对照实验用：patch（块 id 锚）/ find_replace（字符串锚）/ swe_edit（行号锚）。
+toolset   = "swe_edit"
+max_turns = 8

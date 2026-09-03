@@ -1,0 +1,11 @@
+# volc-deepseek-v4-flash 的低推理强度变体（保留，当前实验矩阵不使用——
+# 矩阵统一用 volc-deepseek-v4-flash，避免多配置口径漂移）。
+# 历史背景：output_length 未下发的时期，doc 粒度任务会把默认 32k 预算烧尽在
+# reasoning 上 ⇒ incomplete/length（已修复：现已下发为 max_output_tokens）。
+protocol         = "openai-response"
+base_url         = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model            = "deepseek-v4-flash"
+key_env          = "VOLCENGINE_API_KEY"
+reasoning_effort = "low"
+context_window   = 1048576   # 1024k（信息性，暂不使用）
+output_length    = 393216    # 384k（下发为 max_output_tokens）

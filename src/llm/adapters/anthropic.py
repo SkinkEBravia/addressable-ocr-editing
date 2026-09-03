@@ -1,6 +1,6 @@
 """anthropic 协议适配器：POST {base_url}/v1/messages。
 
-对应 Docs/Design/08-llm.md「协议适配器」节（优先协议之一）。
+对应 Docs/Design/08-llm.md「协议适配器」「错误」节。
 
 - system 消息 ⇒ 顶层 `system` 字段（多条拼接）；messages 只含 user/assistant。
 - `max_tokens` 强制：`ModelConfig.output_length` 必须显式给出，否则 ConfigError。
@@ -9,6 +9,8 @@
   （含在 output_tokens 内）⇒ reasoning_tokens = None。
 - 流式：on_delta 非空 ⇒ stream=true；content_block_delta（text_delta /
   thinking_delta）增量进回调；usage 取 message_start + message_delta 事件。
+- 错误分类：4xx（非 401/403）⇒ rejected；2xx 形状不符 ⇒ protocol_mismatch；
+  流式收尾无文本 ⇒ incomplete；空文本永不静默接受。
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from llm.adapters._transport import (
     raise_for_status,
 )
 from llm.config import ModelConfig
-from llm.errors import ConfigError, LLMError
+from llm.errors import ConfigError, Failure, LLMError
 from llm.types import Completion, Message, Usage
 
 __all__ = ["AnthropicClient"]
@@ -141,7 +143,7 @@ class AnthropicClient:
     ) -> Completion:
         if on_delta is None:
             response = client.post(url, json=payload, headers=self._headers())
-            raise_for_status(response)
+            raise_for_status(response, attempts=attempts)
             return self._parse(response, attempts)
         return self._stream(client, url, payload, on_delta, attempts)
 
@@ -150,13 +152,33 @@ class AnthropicClient:
             data = response.json()
         except ValueError as exc:
             raise LLMError(
-                "响应体不是合法 JSON", kind="bad_response", attempts=attempts
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="响应体不是合法 JSON",
+                    attempts=attempts,
+                    detail={"body_excerpt": response.text[:300]},
+                )
             ) from exc
         if not isinstance(data, dict):
-            raise LLMError("响应体不是 JSON 对象", kind="bad_response", attempts=attempts)
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="响应体不是 JSON 对象",
+                    attempts=attempts,
+                )
+            )
         content = data.get("content")
         if not isinstance(content, list):
-            raise LLMError("响应缺少 content 数组", kind="bad_response", attempts=attempts)
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="响应缺少 content 数组",
+                    attempts=attempts,
+                )
+            )
         parts = [
             block["text"]
             for block in content
@@ -164,13 +186,18 @@ class AnthropicClient:
             and block.get("type") == "text"
             and isinstance(block.get("text"), str)
         ]
-        if not parts:
+        if not parts or not "".join(parts):
             raise LLMError(
-                "响应 content 中没有 text 块", kind="bad_response", attempts=attempts
+                Failure(
+                    stage="llm",
+                    kind="incomplete",
+                    message="响应 content 中没有 text 块（或全为空）",
+                    attempts=attempts,
+                    detail={"stop_reason": data.get("stop_reason")},
+                )
             )
-        usage_dict = data.get("usage")
         return Completion(
-            text="".join(parts), usage=_usage_from_dict(usage_dict), raw=data
+            text="".join(parts), usage=_usage_from_dict(data.get("usage")), raw=data
         )
 
     def _stream(
@@ -184,11 +211,13 @@ class AnthropicClient:
         payload = {**payload, "stream": True}
         text_parts: list[str] = []
         usage_acc: dict = {}
+        n_data_events = 0
         with client.stream(
             "POST", url, json=payload, headers=self._headers()
         ) as response:
-            raise_for_status(response)
+            raise_for_status(response, attempts=attempts)
             for data in iter_sse_data_lines(response):
+                n_data_events += 1
                 try:
                     obj = json.loads(data)
                 except ValueError:
@@ -209,8 +238,28 @@ class AnthropicClient:
                     usage_acc.update((obj.get("message") or {}).get("usage") or {})
                 elif event == "message_delta":
                     usage_acc.update(obj.get("usage") or {})
+        if n_data_events == 0:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="protocol_mismatch",
+                    message="流式响应没有任何 SSE data 事件",
+                    attempts=attempts,
+                )
+            )
+        text = "".join(text_parts)
+        if not text:
+            raise LLMError(
+                Failure(
+                    stage="llm",
+                    kind="incomplete",
+                    message="流式收尾无文本",
+                    attempts=attempts,
+                    detail={"data_events": n_data_events},
+                )
+            )
         return Completion(
-            text="".join(text_parts),
+            text=text,
             usage=_usage_from_dict(usage_acc),
             raw={"stream": True, "usage": usage_acc},
         )

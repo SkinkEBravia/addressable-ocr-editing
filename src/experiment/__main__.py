@@ -4,7 +4,8 @@
 
     python -m experiment --dataset <dir> --toolsets a,b --model m \
         --split dev [--loaders icdar2017/en/doc,dta19-l0/de/chunk] \
-        [--ids ...] [--limit N] [--instruction <路径>] --out runs/<name>
+        [--ids-from meta:key=value] [--ids ...] [--limit N] \
+        [--instruction <路径>] [--no-stream] [--workers N] --out runs/<name>
     python -m experiment --out runs/<name> --replay
     python -m experiment --out runs/<name> --report-only
 """
@@ -15,9 +16,10 @@ import argparse
 import sys
 from pathlib import Path
 
+from agent import load_toolset_config
 from llm import build_client, load_model_config
 
-from experiment.config import load_toolset_config
+from experiment.progress import build_reporter
 from experiment.replay import replay
 from experiment.report import build_report, write_report
 from experiment.run import run_experiment
@@ -69,11 +71,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", required=True, help="输出目录 runs/<name>")
     p.add_argument("--workers", type=int, default=1, help="并发路数（默认 1 串行）")
     p.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="关流式请求（默认开）；只影响观察通道，不改变语义与落盘",
+    )
+    p.add_argument(
         "--reporter",
         default=None,
         help="运行时报告器：rich（默认，流式 TPS）/ null / module:Class（自研组件入口）",
     )
     p.add_argument("--replay", action="store_true", help="磁带重放后处理（不重打 API）")
+    p.add_argument(
+        "--replay-with",
+        action="append",
+        default=None,
+        metavar="LABEL=CONFIG",
+        help="replay 时替换某工具配置标签的 fold 行为（如 patch-1turn=patch-1turn-lenient）；可重复",
+    )
     p.add_argument("--report-only", action="store_true", help="只重建报告（不重跑）")
     return p
 
@@ -89,7 +103,17 @@ def main(argv: list[str] | None = None) -> int:
         print(msg, file=sys.stderr)
 
     if args.replay:
-        result = replay(out, on_progress=progress)
+        overrides = None
+        if args.replay_with:
+            overrides = {}
+            for pair in args.replay_with:
+                label, sep, cfg_name = pair.partition("=")
+                if not sep or not label.strip() or not cfg_name.strip():
+                    print(f"error: --replay-with 需要 LABEL=CONFIG 形式，got {pair!r}",
+                          file=sys.stderr)
+                    return 2
+                overrides[label.strip()] = cfg_name.strip()
+        result = replay(out, on_progress=progress, toolset_overrides=overrides)
         print(f"replay: changed={len(result['changed'])} lower_bound={len(result['lower_bound'])}")
         return 0
 
@@ -109,8 +133,6 @@ def main(argv: list[str] | None = None) -> int:
         instruction = Path(args.instruction).read_text(encoding="utf-8")
 
     client = build_client(model_config)
-    from experiment.progress import build_reporter
-
     prog = build_reporter(args.reporter)
     try:
         summary = run_experiment(
@@ -126,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             instruction=instruction,
             out=out,
             workers=args.workers,
+            stream=not args.no_stream,
             progress=prog,
         )
     finally:

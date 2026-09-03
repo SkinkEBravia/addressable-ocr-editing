@@ -6,11 +6,11 @@
 实现可整体替换——用户自研组件、rich、纯日志均可。
 
 - `RichProgress`（默认）：rich.Live 原地刷新状态行（进度/轮次/墙钟/out tok/TPS）
-  + 最近事件行；非 TTY 退化为事件行。声明了 `delta(text)` ⇒ run 层自动切
-  流式请求，状态行显示滚动 TPS 估值（增量字符 ÷ 4，标 `~`；精确值仍以轮末
-  端点 usage 为准）——只计数，模型输出文本不进终端。
+  + 最近事件行；非 TTY 退化为事件行。声明了 `delta(text)`：run 层在流式开启时
+  把增量喂给它——状态行显示滚动 TPS 估值（增量字符 ÷ 4，标 `~`；精确值仍以
+  轮末端点 usage 为准）。
 - `NullProgress`：全空操作，库内调用缺省。
-- 报告器不声明 `delta` 则走非流式请求（run 层用 `getattr` 探测）。
+- 流式与否是显式运行参数（run_experiment 的 stream），报告器只是订阅者。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Protocol, TextIO, runtime_checkable
 
-from llm.types import Usage
+from agent import Session
 
 __all__ = ["ProgressReporter", "NullProgress", "RichProgress", "build_reporter"]
 
@@ -32,20 +32,18 @@ class ProgressReporter(Protocol):
 
     - `begin(total)`：矩阵开始，告知 cell 总数。
     - `start_cell(label)`：一个 cell 开始（label = "task_id × toolset"）。
-    - `turn(usage)`：一轮完成；usage 为端点计数，None = 端点未返回。
-    - `end_cell(label, status, usage, elapsed_s)`：cell 终态
-      （done / failed[:kind] / resumed），usage 为该 cell 合计。
+    - `turn(session)`：一轮完成；usage 从 session 派生。
+    - `end_cell(label, session, elapsed_s)`：cell 终态
+      （done / budget_exceeded / failed:<kind> / resumed）。
     - `close()`：运行结束（含 Ctrl+C 的 finally），释放终端资源。
 
-    可选能力：`delta(text: str)` —— 流式观察通道（搁置中）。实现了才接入。
+    可选能力：`delta(text: str)` —— 流式观察订阅。实现了才会被喂增量。
     """
 
     def begin(self, total: int) -> None: ...
     def start_cell(self, label: str) -> None: ...
-    def turn(self, usage: Usage | None) -> None: ...
-    def end_cell(
-        self, label: str, status: str, usage: Usage | None, elapsed_s: float
-    ) -> None: ...
+    def turn(self, session: Session) -> None: ...
+    def end_cell(self, label: str, session: Session, elapsed_s: float) -> None: ...
     def close(self) -> None: ...
 
 
@@ -54,16 +52,14 @@ class NullProgress:
 
     def begin(self, total: int) -> None: ...
     def start_cell(self, label: str) -> None: ...
-    def turn(self, usage: Any) -> None: ...
-    def end_cell(self, label: str, status: str, usage: Any, elapsed_s: float) -> None: ...
+    def turn(self, session: Session) -> None: ...
+    def end_cell(self, label: str, session: Session, elapsed_s: float) -> None: ...
     def close(self) -> None: ...
 
 
 class RichProgress:
     """基于 rich.Live 的报告器：状态行 + 最近事件行，原地刷新不堆历史。
 
-    声明了 `delta(text)` ⇒ run 层探测到后自动切换流式请求：状态行的 tok/s
-    变为滚动估值（增量字符数 ÷ 4，标 `~`；精确值仍以轮末端点 usage 为准）。
     只计数不预览——模型输出文本不进终端（输出预览已明确不做）。
     """
 
@@ -150,23 +146,28 @@ class RichProgress:
         with self._lock:
             self._stream_chars += len(text)
 
-    def turn(self, usage: Usage | None) -> None:
+    def turn(self, session: Session) -> None:
         with self._lock:
-            self._turns += 1
+            self._turns = len(session.turns)
+            usage = session.usage
             if usage is not None:
-                self._out_tokens += usage.output_tokens
+                self._out_tokens = usage.output_tokens
             self._stream_chars = 0  # 新轮归零
             if self._tty:
                 self._refresh_locked()
 
-    def end_cell(
-        self, label: str, status: str, usage: Usage | None, elapsed_s: float
-    ) -> None:
+    def end_cell(self, label: str, session: Session, elapsed_s: float) -> None:
         with self._lock:
             self._done += 1
+            usage = session.usage
             tokens = usage.output_tokens if usage is not None else 0
             tps = tokens / elapsed_s if elapsed_s > 0 else 0.0
-            event = f"{label} -> {status} ({elapsed_s:.0f}s, {tokens} out tok, {tps:.1f} tok/s)"
+            event = (
+                f"{label} -> {session.status} "
+                f"({elapsed_s:.0f}s, {tokens} out tok, {tps:.1f} tok/s)"
+            )
+            if session.failure is not None:
+                event += f" [{session.failure.kind}: {session.failure.message[:80]}]"
             if self._tty:
                 self._last_event = event  # 进刷新块，不另起历史行
                 self._refresh_locked()

@@ -141,7 +141,13 @@ def _skip_ws(text: str, pos: int) -> int:
 def _id(arg: object, name: str, lineno: int) -> str:
     if isinstance(arg, _Ident):
         return str(arg)
-    raise ParseError(lineno, f"{name}: expected a bare block id, got {arg!r}")
+    if isinstance(arg, str):
+        # JSON 字符串形式的 id 等价接受：id 与 content 同为字符串，
+        # 类型直觉一致（模型天然会给 id 加引号）；放开只减失败不引矛盾。
+        return arg
+    raise ParseError(
+        lineno, f"{name}: expected a block id (bare or quoted), got {arg!r}"
+    )
 
 
 def _text(arg: object, name: str, lineno: int) -> str:

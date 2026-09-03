@@ -4,5 +4,5 @@ protocol       = "openai-completion"
 base_url       = "https://api.deepseek.com"
 model          = "deepseek-v4-flash"
 key_env        = "DEEPSEEK_API_KEY"
-context_window = 1048576
-output_length  = 393216
+context_window = 1048576     # 1024k（信息性，暂不使用）
+output_length  = 393216      # 384k（下发为 max_tokens）

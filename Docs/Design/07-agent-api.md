@@ -93,6 +93,7 @@ OpError(index, op, reason)                     # IR 层：批次内哪条 core o
 |---|---|---|
 | `snapshot_id` | `SnapshotId` | 新快照 |
 | `affected` | `list[AffectedBlock]` | 受影响的块，按文档序；同一块被多条 op 命中只出现一次（位置取首次出现，`status` 取最后一次） |
+| `errors` | `list[SurfaceError]` | `best_effort` 模式下被跳过 op 的失败清单（见「应用策略」）；`atomic` 恒为空 |
 
 `AffectedBlock`：
 
@@ -145,7 +146,7 @@ replace(b3, "teh", "the")
 
 语法规则：
 
-- 全部位置参数；id 为裸标识符（`HEAD` 表示头部锚点）。
+- 全部位置参数；id 为标识符（`HEAD` 表示头部锚点），可裸写或用 JSON 字符串——`b3` 与 `"b3"` 等价（id 与 content 同为字符串，类型直觉一致）。
 - 字符串与 attrs 对象使用 JSON 语法（转义、多行由 JSON 字符串承担）。
 - 空行与 `#` 开头的行忽略。
 - 按文本顺序依次降解、一次性 `apply`。
@@ -177,9 +178,23 @@ def serve(session: Path, host: str, port: int) -> None   # 阻塞；工具面 = 
 
 ```python
 # Agent 接口（库内）
-def run_patch(store, patch_text: str, strategy: AgentIdStrategy, annotator: Annotator) -> PatchResult
+def run_patch(store, patch_text: str, strategy: AgentIdStrategy, annotator: Annotator,
+              *, mode: str = "atomic") -> PatchResult
 # 失败抛 ParseError / SurfaceError（均带 to_dict()；CLI 凭异常类型映射退出码）
 ```
+
+### 应用策略（可替换件）
+
+`mode` 选择 op 的应用语义，缺省 `"atomic"` 即上文全部语义，随时可切回：
+
+| mode | 语义 |
+|---|---|
+| `atomic` | 整批一次性 `apply`；任一 op 失败 ⇒ 全批回滚，store 不变，抛 `SurfaceError` |
+| `best_effort` | 逐条 degrade + apply + save：失败 op 跳过并记入 `PatchResult.errors`（`SurfaceError` 列表），其余照常提交；成功 op 间链式叠加保持，id 仍以 patch 前 View 为准。语法错误（`ParseError`）仍整批拒绝——语法是整段 patch 的属性，不是单条 op 的 |
+
+`best_effort` 的适用假设：op 互不影响（如 OCR 修复的 replace 散布各块）。批次原子性重要的场景（结构化重排）用 `atomic`。
+
+`PatchResult` 增加字段 `errors: tuple[SurfaceError, ...]`（atomic 恒为空）。
 
 ```text
 # CLI（会话目录共享状态）

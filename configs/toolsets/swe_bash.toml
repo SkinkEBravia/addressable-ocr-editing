@@ -1,0 +1,4 @@
+# swe_bash：SWE-agent 环境的忠实复刻——模型只有一个 bash 入口，
+# edit 是 PATH 上的脚本（v0.7 语义）；本机 Git Bash 后端（无沙箱，可信输入专用）。
+toolset   = "swe_bash"
+max_turns = 8

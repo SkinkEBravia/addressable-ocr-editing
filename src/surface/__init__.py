@@ -23,6 +23,8 @@ from surface.ops import (
 )
 from surface.parse import parse
 from surface.patch import (
+    APPLY_ATOMIC,
+    APPLY_BEST_EFFORT,
     STATUS_APPENDED,
     STATUS_MERGED,
     STATUS_MOVED,
@@ -59,6 +61,8 @@ __all__ = [
     "run_patch",
     "PatchResult",
     "AffectedBlock",
+    "APPLY_ATOMIC",
+    "APPLY_BEST_EFFORT",
     "STATUS_APPENDED",
     "STATUS_UPDATED",
     "STATUS_MOVED",

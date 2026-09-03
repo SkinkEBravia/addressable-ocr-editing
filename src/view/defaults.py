@@ -10,7 +10,7 @@ from ir import Block
 
 from view.types import AgentBlockId
 
-__all__ = ["blockkey_as_is", "xml_ish"]
+__all__ = ["blockkey_as_is", "xml_ish", "line_number", "cat_n"]
 
 
 def blockkey_as_is(block: Block, index: int) -> AgentBlockId:
@@ -31,3 +31,22 @@ def xml_ish(agent_id: AgentBlockId, content: str) -> str:
     因此全量 payload 直接按序拼接各块标注即得。
     """
     return f'<x id="{agent_id}"\\>\n{content}\n</x>\n'
+
+
+def line_number(block: Block, index: int) -> AgentBlockId:
+    """id 策略 ``line-number``：AgentBlockId = 行号（1 起，按文档序）。
+
+    与 partition_lines 配套构成行号锚操作面；id 是位置性的——编辑后
+    行号漂移，下一次 View 重排（BlockKey 不出现在 Agent 视野）。
+    """
+    return str(index + 1)
+
+
+def cat_n(agent_id: AgentBlockId, content: str) -> str:
+    """标注形式 ``cat-n``：``N: content``（cat -n 风格）。
+
+    与 partition_lines 配套：块 content 自带行终止符（keepends），
+    这里只在缺失时补齐最后一个换行。
+    """
+    text = f"{agent_id}: {content}"
+    return text if text.endswith("\n") else text + "\n"

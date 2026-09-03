@@ -1,3 +1,0 @@
-# 逐单元重写后拼接（doc 粒度的归因参照）；max_turns 为每单元轮数预算的基数
-toolset   = "rewrite_pieces"
-max_turns = 1

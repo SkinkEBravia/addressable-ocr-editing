@@ -1,0 +1,10 @@
+# patch 单轮 × best_effort 应用 × 隐去 append/merge。
+# 背景：单轮横向对比（对 rewrite）用 max_turns=1；best_effort 逐条应用、
+# 失败 op 跳过并回报（OCR 修复 op 互不影响假设），避免一条错全批回滚；
+# 本任务模型只用 replace（append/merge 零使用），提示词隐去。
+toolset    = "patch"
+max_turns  = 1
+apply_mode = "best_effort"
+hide_ops   = ["append", "merge"]
+partition  = "lines"
+block_size = 400

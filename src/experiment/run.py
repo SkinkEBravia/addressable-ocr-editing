@@ -1,13 +1,14 @@
 """experiment 的执行矩阵：dataset × toolset × model。
 
-对应 Docs/Design/11-experiment.md「运行配置」「公平性」「对话录」节。
+对应 Docs/Design/11-experiment.md「运行配置」「公平性」「磁带存储」节。
 
 - 同一实验内所有工具配置共用同一模型配置与预算口径（公平性）。
 - resume 的键 = (task_id, toolset, config_hash)；配置变了即重跑。
-- 每轮增量落盘；LLMError 级别失败 => status=failed，回退原文。
-- workers > 1 时按 cell 并发（线程池）；并发只改变完成顺序，
-  不改变任何 cell 的语义与落盘内容。进程内共享 client：适配器每次调用
-  自建 httpx.Client，线程安全。
+  failed:* 与 running（中断残留）一律重跑；done / budget_exceeded 跳过。
+- 每轮增量落盘（SessionStore）；失败现场（Session.failure）随磁带持久。
+- workers > 1 时按 cell 并发（线程池）。cell 之间无共享可变状态：
+  每个 cell 独立 Session 与 workdir；client 无状态、每次调用自建连接。
+  并发只改变完成顺序，不改变任何 cell 的语义与落盘内容。
 """
 
 from __future__ import annotations
@@ -17,17 +18,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from agent import Session, ToolsetConfig, build_toolset, run_session, start_session
 from datasetkit import load_dataset, resolve
-from llm import LLMClient, LLMError, load_env_file
-from toolsets import LoopResult, run_toolset
+from llm import LLMClient, load_env_file
 
-from experiment.config import (
-    ToolsetConfig,
-    build_toolset,
-    config_hash,
-)
+from experiment.config import config_hash
 from experiment.progress import NullProgress
-from experiment.transcript import TranscriptWriter
+from experiment.store import SessionStore
 
 __all__ = ["run_experiment", "RunSummary"]
 
@@ -50,12 +47,13 @@ def run_experiment(
     instruction: str | None = None,
     out: Path,
     workers: int = 1,
+    stream: bool = True,
     progress: Any = None,
 ) -> RunSummary:
-    """执行矩阵。返回汇总；对话录逐轮落盘于 out/raw/。
+    """执行矩阵。返回汇总；磁带逐轮落盘于 out/sessions/。
 
     instruction 缺省用数据集的 default_instruction()。
-    workers 为并发路数（默认 1，串行）。
+    workers 为并发路数（默认 1，串行）。stream 为流式观察开关（默认开）。
     """
     load_env_file()  # 项目 .env 先进进程环境（幂等）
     progress = progress or NullProgress()
@@ -90,50 +88,50 @@ def run_experiment(
 
     progress.begin(len(cells))
     summary = RunSummary()
+    store = SessionStore(out)
+    # 流式观察：显式开关 + 报告器订阅者同时满足才接 delta
+    on_delta = getattr(progress, "delta", None) if stream else None
 
     def run_cell(cell: tuple[Any, ToolsetConfig, Any, str]) -> None:
         task, cfg, toolset, cfg_hash = cell
         label = f"{task.task_id} × {cfg.name}"
-        writer = TranscriptWriter(out, task.task_id, cfg.name, cfg_hash)
-        if writer.config_hash_matches():
+        old = store.resumable(task.task_id, cfg.name, cfg_hash)
+        if old is not None:
             summary[str((task.task_id, cfg.name))] = "resumed"
-            progress.end_cell(label, "resumed", None, 0.0)
+            progress.end_cell(label, old, 0.0)
             return
         workdir = out / "work" / task.task_id / cfg.name
-        workdir.mkdir(parents=True, exist_ok=True)
+        session, messages = start_session(
+            toolset,
+            label=cfg.name,
+            task_id=task.task_id,
+            task_input=task.input,
+            task_meta=task.meta,
+            instruction=instruction,
+            workdir=workdir,
+            config_hash=cfg_hash,
+            budget=cfg.budget(),
+        )
         progress.start_cell(label)
         t0 = time.monotonic()
+        store.write(session)  # 尽早落盘：running 态 / 组装期失败都可审计
 
-        def on_turn(turn, turns, _w=writer):
-            _w.write_turn(turn, turns)
-            progress.turn(turn.completion.usage)
+        def on_turn(sess: Session) -> None:
+            store.write(sess)
+            progress.turn(sess)
 
-        # 流式观察通道（搁置）：报告器声明了 delta 才接入，否则非流式请求
-        on_delta = getattr(progress, "delta", None)
-
-        try:
-            result = run_toolset(
-                client,
-                task,
-                toolset,
-                cfg.budget(),
-                instruction,
-                workdir,
-                on_turn=on_turn,
-                on_delta=on_delta,
-            )
-            status = result.status
-        except LLMError as exc:
-            result = LoopResult(
-                output=task.input,  # 失败回退原文
-                status=f"failed:{exc.kind}",  # 失败类别落盘（可审计、resume 会重试）
-                turns=(),
-                total_usage=None,
-            )
-            status = result.status
-        writer.finalize(result, list(result.turns))
-        summary[str((task.task_id, cfg.name))] = result.status
-        progress.end_cell(label, status, result.total_usage, time.monotonic() - t0)
+        run_session(
+            client,
+            toolset,
+            session,
+            messages,
+            fallback_text=task.input,
+            on_turn=on_turn,
+            on_delta=on_delta,
+        )
+        store.write(session)
+        summary[str((task.task_id, cfg.name))] = session.status
+        progress.end_cell(label, session, time.monotonic() - t0)
 
     if workers <= 1:
         for cell in cells:

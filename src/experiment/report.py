@@ -1,11 +1,12 @@
 """experiment 的报告：report.json + 汇总。
 
-对应 Docs/Design/11-experiment.md「报告」节。
+对应 Docs/Design/11-experiment.md「评测与报告」节。
 
+- 磁带经 SessionStore 读回（与 resume 同一代码路径），usage 从 Session 派生。
 - 指标语义归数据集，报告只按名聚合。
 - token 构成单列（reasoning_tokens 占比）。
 - 配对比较：同 task 两工具配置的 output_ratio、Δ指标 + bootstrap 95% CI。
-- 解析后的全部配置落盘，可复现可审计。
+- 失败样本带 failure 段；按 failure.kind 聚合计数。
 - 数据集若提供 score_all（聚合口径），其结果一并落盘。
 """
 
@@ -18,22 +19,25 @@ from typing import Any
 
 from datasetkit import ScoreError, load_dataset, resolve
 from evalkit import bootstrap_ci, output_ratio, paired_diff_ci
+from llm import Usage
+
+from experiment.store import SessionStore
 
 __all__ = ["build_report", "write_report"]
 
 
-def _usage_row(total: dict | None) -> dict:
-    if total is None:
+def _usage_row(session) -> dict:
+    usage = session.usage
+    if usage is None:
         return {"usage_missing": True}
     row = {
-        "input_tokens": total["input_tokens"],
-        "output_tokens": total["output_tokens"],
-        "tokens_total": total["input_tokens"] + total["output_tokens"],
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "tokens_total": usage.total,
     }
-    reasoning = total.get("reasoning_tokens")
-    if reasoning is not None and total["output_tokens"] > 0:
-        row["reasoning_tokens"] = reasoning
-        row["reasoning_share"] = reasoning / total["output_tokens"]
+    if usage.reasoning_tokens is not None and usage.output_tokens > 0:
+        row["reasoning_tokens"] = usage.reasoning_tokens
+        row["reasoning_share"] = usage.reasoning_tokens / usage.output_tokens
     return row
 
 
@@ -49,29 +53,30 @@ def build_report(
     loader_keys: list[str] | None = None,
     meta: dict[str, str] | None = None,
 ) -> dict:
-    """从对话录 + scorer 构建报告（不重打 API）。"""
+    """从磁带 + scorer 构建报告（不重打 API）。"""
     dataset = load_dataset(dataset_dir)
     tasks = {
         t.task_id: t
         for t in resolve(dataset, split=split, keys=loader_keys, meta=meta)
     }
     scorer = dataset.scorer()
+    store = SessionStore(out)
 
-    raw_root = out / "raw"
     per_sample: dict[str, dict[str, Any]] = {}  # toolset -> task_id -> row
     for name in toolset_names:
         rows: dict[str, Any] = {}
         for task_id, task in tasks.items():
-            path = raw_root / task_id / f"{name}.json"
-            if not path.is_file():
+            session = store.read(task_id, name)
+            if session is None:
                 continue
-            data = json.loads(path.read_text(encoding="utf-8"))
-            output = data.get("output", task.input)
+            output = session.output if session.output is not None else task.input
             row: dict[str, Any] = {
-                "status": data.get("status"),
-                "turns": len(data.get("turns", [])),
-                "usage": _usage_row(data.get("total_usage")),
+                "status": session.status,
+                "turns": len(session.turns),
+                "usage": _usage_row(session),
             }
+            if session.failure is not None:
+                row["failure"] = session.failure.to_dict()
             if task.reference is None:
                 row["score"] = None  # masked 不出数
             else:
@@ -83,7 +88,7 @@ def build_report(
             rows[task_id] = row
         per_sample[name] = rows
 
-    # 聚合：指标均值 + bootstrap CI；token 构成
+    # 聚合：指标均值 + bootstrap CI；token 构成；失败按 kind 计数
     aggregate: dict[str, Any] = {}
     metric_names: set[str] = set()
     for rows in per_sample.values():
@@ -108,6 +113,14 @@ def build_report(
                 agg["tokens"]["reasoning"] = sum(reasoning)  # type: ignore[arg-type]
                 if total_out:
                     agg["tokens"]["reasoning_share"] = sum(reasoning) / total_out  # type: ignore[arg-type]
+        failures: dict[str, int] = {}
+        for r in rows.values():
+            f = r.get("failure")
+            if f:
+                kind = f["kind"]
+                failures[kind] = failures.get(kind, 0) + 1
+        if failures:
+            agg["failures"] = failures
         aggregate[name] = agg
 
     # 配对比较：每对工具配置，同 task 配对
@@ -126,12 +139,8 @@ def build_report(
             entry: dict[str, Any] = {}
             ratios = [
                 output_ratio(
-                    None
-                    if per_sample[a][t]["usage"].get("usage_missing")
-                    else _usage_obj(per_sample[a][t]["usage"]),
-                    None
-                    if per_sample[b][t]["usage"].get("usage_missing")
-                    else _usage_obj(per_sample[b][t]["usage"]),
+                    _usage_obj(per_sample[a][t]["usage"]),
+                    _usage_obj(per_sample[b][t]["usage"]),
                 )
                 for t in common
             ]
@@ -160,9 +169,9 @@ def build_report(
             for task_id, row in rows.items():
                 task = tasks[task_id]
                 if task.reference is not None and row.get("status") is not None:
-                    raw_path = raw_root / task_id / f"{name}.json"
-                    data = json.loads(raw_path.read_text(encoding="utf-8"))
-                    pairs.append((task, data.get("output", task.input)))
+                    session = store.read(task_id, name)
+                    out_text = session.output if session and session.output is not None else task.input
+                    pairs.append((task, out_text))
             if pairs:
                 try:
                     official[name] = score_all(pairs)
@@ -187,9 +196,9 @@ def build_report(
     }
 
 
-def _usage_obj(row: dict):
-    from llm import Usage
-
+def _usage_obj(row: dict) -> Usage | None:
+    if row.get("usage_missing"):
+        return None
     return Usage(row["input_tokens"], row["output_tokens"], row.get("reasoning_tokens"))
 
 

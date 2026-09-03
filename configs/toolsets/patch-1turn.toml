@@ -1,0 +1,8 @@
+# patch 的单轮变体：与 rewrite（单轮全文重写）做单轮横向对比用。
+# 同一个 patch 工具集，只收紧轮数预算；标签独立（报告与磁带的 key 互不影响）。
+# 注意：单轮下模型来不及输出 done()，status 恒为 budget_exceeded——
+# 这是设计内行为，extract 照常产出、照常评分。
+toolset    = "patch"
+max_turns  = 1
+partition  = "lines"
+block_size = 400

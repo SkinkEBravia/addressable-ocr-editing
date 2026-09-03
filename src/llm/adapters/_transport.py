@@ -1,11 +1,11 @@
 """协议适配器共用的传输层：重试驱动、退避、HTTP 状态分类。
 
-对应 Docs/Design/08-llm.md「错误与重试」节。
+对应 Docs/Design/08-llm.md「错误」节。
 
-- 传输层重试（timeout / rate_limit / server）在 client 内完成：指数退避，
+- 重试通道（timeout / rate_limit / server）在 client 内完成：指数退避，
   尊重端点 Retry-After，上限 max_transport_retries。
-- auth / bad_response 不重试。
-- 安全约束：API key 不打印、不进异常消息。
+- auth / rejected / protocol_mismatch / incomplete 不进重试通道，直接失败。
+- 安全约束：API key 不打印、不进异常消息与 Failure detail。
 """
 
 from __future__ import annotations
@@ -16,13 +16,14 @@ from collections.abc import Callable
 import httpx
 
 from llm.config import ModelConfig
-from llm.errors import LLMError
+from llm.errors import Failure, LLMError
 from llm.types import Completion
 
-__all__ = ["Retryable", "backoff", "raise_for_status", "call_with_retries"]
+__all__ = ["Retryable", "backoff", "raise_for_status", "call_with_retries", "iter_sse_data_lines"]
 
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_MAX_SECONDS = 60.0
+_BODY_EXCERPT = 300  # rejected 的 detail 里 body 摘录长度上限
 
 
 def backoff(retry_index: int, retry_after: str | None = None) -> None:
@@ -53,8 +54,8 @@ class Retryable(Exception):
         self.retry_after = retry_after
 
 
-def raise_for_status(response: httpx.Response) -> None:
-    """HTTP 状态分类：2xx 放行；429/5xx 可重试；401/403 auth；其余 bad_response。"""
+def raise_for_status(response: httpx.Response, *, attempts: int) -> None:
+    """HTTP 状态分类：2xx 放行；429/5xx 进重试通道；401/403 auth；其余 rejected。"""
     status = response.status_code
     if 200 <= status < 300:
         return
@@ -73,16 +74,35 @@ def raise_for_status(response: httpx.Response) -> None:
             retry_after=response.headers.get("Retry-After"),
         )
     if status in (401, 403):
-        raise LLMError("认证失败（不可重试）", kind="auth", status=status)
+        raise LLMError(
+            Failure(
+                stage="llm",
+                kind="auth",
+                message="认证失败（不可重试）",
+                http_status=status,
+                attempts=attempts,
+            )
+        )
     raise LLMError(
-        f"请求被拒绝（HTTP {status}）", kind="bad_response", status=status
+        Failure(
+            stage="llm",
+            kind="rejected",
+            message=f"请求被拒绝（HTTP {status}，不可重试）",
+            http_status=status,
+            attempts=attempts,
+            detail={"body_excerpt": response.text[:_BODY_EXCERPT]},
+        )
     )
 
 
 def call_with_retries(
     config: ModelConfig, fn: Callable[[int], Completion]
 ) -> Completion:
-    """重试驱动：fn(attempts) 执行一次调用；可重试失败按指数退避重发。"""
+    """重试驱动：fn(attempts) 执行一次调用；重试通道失败按指数退避重发。
+
+    LLMError（失败通道）原样上浮；此处只补录 elapsed_s。
+    """
+    t0 = time.monotonic()
     attempts = 0
     while True:
         attempts += 1
@@ -91,21 +111,54 @@ def call_with_retries(
         except httpx.TimeoutException as exc:
             if attempts > config.max_transport_retries:
                 raise LLMError(
-                    f"超时：{type(exc).__name__}", kind="timeout", attempts=attempts
+                    Failure(
+                        stage="llm",
+                        kind="timeout",
+                        message=f"超时：{type(exc).__name__}",
+                        attempts=attempts,
+                        elapsed_s=time.monotonic() - t0,
+                    )
                 ) from exc
             backoff(attempts)
         except httpx.TransportError as exc:
             if attempts > config.max_transport_retries:
                 raise LLMError(
-                    f"网络错误：{type(exc).__name__}", kind="timeout", attempts=attempts
+                    Failure(
+                        stage="llm",
+                        kind="timeout",
+                        message=f"网络错误：{type(exc).__name__}: {exc}",
+                        attempts=attempts,
+                        elapsed_s=time.monotonic() - t0,
+                    )
                 ) from exc
             backoff(attempts)
         except Retryable as r:
             if attempts > config.max_transport_retries:
                 raise LLMError(
-                    str(r), kind=r.kind, status=r.status, attempts=attempts
+                    Failure(
+                        stage="llm",
+                        kind=r.kind,
+                        message=str(r),
+                        http_status=r.status,
+                        attempts=attempts,
+                        elapsed_s=time.monotonic() - t0,
+                    )
                 ) from r
             backoff(attempts, r.retry_after)
+        except LLMError as exc:
+            if exc.failure.elapsed_s is None:
+                raise LLMError(
+                    Failure(
+                        stage=exc.failure.stage,
+                        kind=exc.failure.kind,
+                        message=exc.failure.message,
+                        http_status=exc.failure.http_status,
+                        attempts=attempts,
+                        elapsed_s=time.monotonic() - t0,
+                        detail=exc.failure.detail,
+                    )
+                ) from exc
+            raise
 
 
 def iter_sse_data_lines(response: httpx.Response):

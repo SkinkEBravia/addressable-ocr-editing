@@ -123,6 +123,25 @@ class TestParse:
         assert ei.value.line == 4
         assert "unknown operation" in ei.value.reason
 
+    def test_quoted_ids_equivalent_to_bare(self) -> None:
+        """带引号的 id 与裸标识符等价（与 content 同为字符串，类型直觉一致）。"""
+        ops = parse(
+            'set_content("b3", "全文")\n'
+            'append("HEAD", "文首")\n'
+            'move("b1", "b5")\n'
+            'merge("b1", "b2")\n'
+            'replace("b3", "teh", "the")\n'
+            'remove("b4")\n'
+        )
+        assert ops == (
+            SetContent(position=(1, 1), id="b3", text="全文"),
+            Append(position=(2, 2), anchor="HEAD", text="文首", attrs=None),
+            Move(position=(3, 3), id="b1", anchor="b5"),
+            Merge(position=(4, 4), a="b1", b="b2"),
+            Replace(position=(5, 5), id="b3", old="teh", new="the"),
+            Remove(position=(6, 6), id="b4"),
+        )
+
     @pytest.mark.parametrize(
         "line, fragment",
         [
@@ -133,13 +152,12 @@ class TestParse:
             ('set_content(b1, "x"', "expected `name(args)`"),
             ('set_content(b1, "x)', "invalid JSON"),
             ('set_content(b1, 5)', "must be a JSON string"),
-            ('set_content("b1", "x")', "expected a bare block id"),
             ('set_attrs(b1, "not-obj")', "must be a JSON object"),
             ('append(b1, "x", "not-obj")', "must be a JSON object"),
             ("remove(b1, b2)", "takes 1 argument"),
             ("remove()", "takes 1 argument"),
             ("move(b1)", "takes 2 argument"),
-            ("move(b1, 3)", "expected a bare block id"),
+            ("move(b1, 3)", "expected a block id"),
             ('remove(b1,) ', "trailing comma"),
             ('set_content(b1 "x")', "expected ','"),
         ],
@@ -460,3 +478,73 @@ class TestRunPatch:
         ]
         new = ir.load(store, result.snapshot_id)
         assert [b.key for b in new.blocks] == ["b1", "b6", "b5", "b2", "b3"]
+
+
+class TestBestEffortApply:
+    """best_effort 应用策略：逐条应用，失败 op 跳过并回报（07「应用策略」）。
+
+    默认 atomic 不变：任一失败全批回滚。
+    """
+
+    def test_failed_ops_skipped_rest_committed(self, tmp_path) -> None:
+        store, _ = _store(tmp_path)
+        result = run_patch(
+            store,
+            'replace(b1, "aa", "AA")\n'
+            'replace(b2, "zz", "Z")\n'  # PATTERN_NOT_FOUND -> 跳过
+            'replace(b3, "cc", "CC")\n'
+            'replace(b9, "x", "y")\n',  # 未知 id -> 跳过
+            blockkey_as_is,
+            xml_ish,
+            mode="best_effort",
+        )
+        assert [e.surface_index for e in result.errors] == [1, 3]
+        assert result.errors[0].cause == PATTERN_NOT_FOUND
+        assert result.errors[0].position == (2, 2)
+        new = ir.load(store, ir.current(store))
+        assert [b.content for b in new.blocks] == ["AAAA", "bbbb", "CCCC", "dddd"]
+        assert result.snapshot_id == new.id
+        assert [ab.key for ab in result.affected] == ["b1", "b3"]
+        json.dumps(result.to_dict())  # 回执（含 errors）可 JSON 序列化
+
+    def test_chaining_preserved_among_applied_ops(self, tmp_path) -> None:
+        """成功 op 之间链式叠加仍成立：后者在前者结果上匹配。"""
+        store, _ = _store(tmp_path)
+        result = run_patch(
+            store,
+            'set_content(b2, "xyz")\n'
+            'replace(b2, "zz", "Q")\n'  # 失败：当前内容已是 xyz
+            'replace(b2, "y", "Y")\n',  # 成功：作用于 set_content 的结果
+            blockkey_as_is,
+            xml_ish,
+            mode="best_effort",
+        )
+        assert len(result.errors) == 1
+        new = ir.load(store, result.snapshot_id)
+        assert [b.content for b in new.blocks][1] == "xYz"
+
+    def test_atomic_remains_default(self, tmp_path) -> None:
+        store, _ = _store(tmp_path)
+        before = _store_fingerprint(store)
+        with pytest.raises(SurfaceError):
+            run_patch(
+                store,
+                'replace(b1, "aa", "AA")\nreplace(b2, "zz", "Z")',
+                blockkey_as_is,
+                xml_ish,
+            )
+        assert _store_fingerprint(store) == before
+
+    def test_parse_error_still_rejects_all(self, tmp_path) -> None:
+        """语法错误不是逐条问题：best_effort 下 ParseError 仍整批拒绝。"""
+        store, _ = _store(tmp_path)
+        before = _store_fingerprint(store)
+        with pytest.raises(ParseError):
+            run_patch(
+                store,
+                'replace(b1, "aa", "AA")\nnope(',
+                blockkey_as_is,
+                xml_ish,
+                mode="best_effort",
+            )
+        assert _store_fingerprint(store) == before

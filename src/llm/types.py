@@ -1,6 +1,6 @@
-"""llm 的数据类型：Message / Usage / Completion / Turn。
+"""llm 的数据类型：Message / Usage / Completion。
 
-对应 Docs/Design/08-llm.md「定义」节。
+对应 Docs/Design/08-llm.md「定义」节。对话记录（Turn）归 09 的 agent 模块。
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-__all__ = ["Role", "Message", "Usage", "Completion", "Turn"]
+__all__ = ["Role", "Message", "Usage", "Completion"]
 
 Role = Literal["system", "user", "assistant"]
 
@@ -44,18 +44,10 @@ class Completion:
 
     usage 为 None 表示端点未返回 usage（报告记 usage_missing）。
     raw 为端点原始响应（审计用）。
-    elapsed_s 为本次调用的墙钟秒数（含重试前的等待不含），供 TPS 统计。
+    elapsed_s 为本次调用的墙钟秒数（含重试等待），供 TPS 统计。
     """
 
     text: str
     usage: Usage | None
     raw: Any = None
     elapsed_s: float | None = None
-
-
-@dataclass(frozen=True)
-class Turn:
-    """一轮对话的记录。"""
-
-    index: int
-    completion: Completion

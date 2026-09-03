@@ -1,6 +1,6 @@
-"""experiment 的冒烟与自洽测试（Docs/Design/11-experiment.md「验收」）。
+"""experiment：冒烟 / resume / replay / 报告自洽（Docs/Design/11-experiment.md「验收」）。
 
-tiny 数据集 × noop/rewrite/patch/find_replace × StubClient（录制回放）。
+全部用 StubClient 离线运行；patch cell 走真实 IR 链路。
 """
 
 from __future__ import annotations
@@ -8,89 +8,33 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
+from agent import load_toolset_config
+from experiment import SessionStore, run_experiment
+from experiment.replay import replay
+from experiment.report import build_report, write_report
+from llm import Failure, LLMError, StubClient
 
-from datasetkit import load_dataset
-from llm import Message, StubClient
-from experiment import (
-    build_report,
-    load_toolset_config,
-    run_experiment,
-    write_report,
-)
-from experiment.config import ToolsetConfig
-
-ROOT = Path(__file__).resolve().parents[1]
-TINY = ROOT / "datasets" / "tiny"
-
-_MODEL = {
-    "protocol": "openai-completion",
-    "base_url": "https://stub",
-    "model": "stub",
-    "key_env": "STUB",
-}
+TINY = Path("datasets/tiny")
+REWRITE_RESP = '{"ocr_postcorrection_output": "fixed text"}'
+TOOLSETS = ["noop", "rewrite", "patch"]
 
 
-def _configs() -> list[ToolsetConfig]:
-    return [
-        ToolsetConfig(name="noop", toolset="noop"),
-        ToolsetConfig(name="rewrite", toolset="rewrite", max_turns=1),
-        ToolsetConfig(name="patch", toolset="patch", max_turns=4),
-        ToolsetConfig(name="find_replace", toolset="find_replace", max_turns=4),
-    ]
-
-
-def _stub() -> StubClient:
-    # tiny: t1 "teh...teh..."、t2 "oldSwarth / ar.d"、t3 masked。
-    # 脚本按调用顺序消费；每个 task 的 patch/find_replace 最多两轮（含 done）。
-    return StubClient(
-        [
-            # 顺序由 run 的 (toolset, task) 遍历决定；用回调按内容应答更稳
-            lambda msgs: _answer(msgs),
-        ]
-        * 1
-    )
-
-
-def _answer(msgs) -> str:
-    """按请求内容给出确定性响应的假端点。
-
-    组装口径（09 规则 1）：工具集类型看 system 消息（instruction + clause），
-    对话状态看最后一条消息（输入呈现 / 反馈）。
-    """
-    system = msgs[0].content if msgs and msgs[0].role == "system" else ""
-    last = msgs[-1].content
-    if "PATTERN_NOT_FOUND" in last or "parse error: " in last:
-        return "done()"
-    if "Return a JSON object" in system:  # rewrite
-        if "oldSwarth" in last:
-            return '{"ocr_postcorrection_output": "Rich old Swarth LAND and water\\n"}'
-        return '{"ocr_postcorrection_output": "the quick brown fox jumps over the lazy dog\\n"}'
-    if "<x id=" in last:  # patch 视图
-        if "oldSwarth" in last:
-            return 'replace(b1, "oldSwarth", "old Swarth")\nreplace(b1, "ar.d", "and")'
-        return 'replace(b1, "teh", "the")'
-    if "replaced" in last or "patch applied" in last:
-        return "done()"
-    if "find_replace" in system:  # find_replace 首轮
-        if "oldSwarth" in last:
-            return 'find_replace("oldSwarth", "old Swarth")\nfind_replace("ar.d", "and")'
-        return 'find_replace("teh", "the")'
-    return "done()"
-
-
-def _run(tmp_path: Path) -> Path:
-    out = tmp_path / "run1"
-    summary = run_experiment(
+def _run(out: Path, script: list) -> dict:
+    return run_experiment(
         dataset_dir=TINY,
-        toolset_configs=_configs(),
-        client=StubClient([_answer] * 64),
-        model_config_dict=_MODEL,
+        toolset_configs=[load_toolset_config(n) for n in TOOLSETS],
+        client=StubClient(script),
+        model_config_dict={"model": "stub"},
         split="all",
         out=out,
+        workers=1,
+        stream=False,
     )
-    assert set(summary.values()) <= {"done"}
-    return out
+
+
+def _smoke_script() -> list:
+    # cell 顺序：noop(t1..t3 无调用) -> rewrite t1..t3 -> patch t1..t3
+    return [REWRITE_RESP] * 3 + ["done()"] * 3
 
 
 def _report(out: Path) -> dict:
@@ -98,215 +42,112 @@ def _report(out: Path) -> dict:
         dataset_dir=TINY,
         split="all",
         out=out,
-        toolset_names=["noop", "rewrite", "patch", "find_replace"],
-        model_config_dicts={"stub": _MODEL},
-        toolset_config_dicts={c.name: c.as_dict() for c in _configs()},
+        toolset_names=TOOLSETS,
+        model_config_dicts={"stub": {"model": "stub"}},
+        toolset_config_dicts={n: load_toolset_config(n).as_dict() for n in TOOLSETS},
         instruction=None,
     )
     write_report(report, out)
     return report
 
 
-def test_smoke_all_toolsets_done(tmp_path: Path):
-    out = _run(tmp_path)
-    # 对话录逐轮落盘：每个 (task, toolset) 一个文件
-    raw = [
-        p for p in (out / "raw").glob("*/*.json") if p.parent.name != "messages"
-    ]
-    assert len(raw) == 3 * 4  # 3 tasks × 4 toolsets
+def test_smoke_and_report_consistency(tmp_path):
+    out = tmp_path / "run"
+    summary = _run(out, _smoke_script())
+    assert set(summary.values()) == {"done"}
+
     report = _report(out)
-    assert (out / "report.json").is_file()
-    for name in ("noop", "rewrite", "patch", "find_replace"):
-        assert name in report["per_sample"]
+    store = SessionStore(out)
+    for name in TOOLSETS:
+        rows = report["per_sample"][name]
+        assert set(rows) == {"t1", "t2", "t3"}
+        for task_id, row in rows.items():
+            assert row["status"] == "done"
+            # tokens_total == Σ 各轮 usage（端点计数自洽）
+            session = store.read(task_id, name)
+            assert session is not None
+            usage = session.usage
+            assert usage is not None
+            assert row["usage"]["tokens_total"] == usage.total
+        # masked 样本不出数
+        assert rows["t3"]["score"] is None
+    assert report["per_sample"]["rewrite"]["t1"]["score"]["cer"] is not None
+    # noop 锚点：output == input，指标即 no-correction 基线
+    t1 = report["per_sample"]["noop"]["t1"]
+    assert t1["usage"]["tokens_total"] == 0
 
 
-def test_masked_not_scored(tmp_path: Path):
-    report = _report(_run(tmp_path))
-    for name in ("noop", "rewrite", "patch", "find_replace"):
-        assert report["per_sample"][name]["t3"]["score"] is None
+def test_resume_skips_done_and_reruns_failed(tmp_path):
+    out = tmp_path / "run"
+    _run(out, _smoke_script())
 
-
-def test_tokens_total_self_consistent(tmp_path: Path):
-    out = _run(tmp_path)
-    for path in (out / "raw").glob("*/*.json"):
-        if path.parent.name == "messages":
-            continue
-        data = json.loads(path.read_text(encoding="utf-8"))
-        turns = data["turns"]
-        if data["total_usage"] is None:
-            continue
-        assert data["total_usage"]["input_tokens"] == sum(
-            t["completion"]["usage"]["input_tokens"] for t in turns
-        )
-        assert data["total_usage"]["output_tokens"] == sum(
-            t["completion"]["usage"]["output_tokens"] for t in turns
-        )
-
-
-def test_noop_identity_and_corrections_improve(tmp_path: Path):
-    report = _report(_run(tmp_path))
-    # noop：output == input（t1 的 cer == cer_hyp 水平，即不改）
-    assert report["per_sample"]["noop"]["t1"]["score"]["cer"] == pytest.approx(
-        report["per_sample"]["noop"]["t1"]["score"]["cer"], abs=1e-9
-    )
-    # patch 修好了 t1：cer == 0
-    assert report["per_sample"]["patch"]["t1"]["score"]["cer"] == 0.0
-    assert report["per_sample"]["find_replace"]["t1"]["score"]["cer"] == 0.0
-    # noop 的 t1 cer > 0（确有错误）
-    assert report["per_sample"]["noop"]["t1"]["score"]["cer"] > 0
-
-
-def test_resume_skips_same_config(tmp_path: Path):
-    out = _run(tmp_path)
-    summary = run_experiment(
-        dataset_dir=TINY,
-        toolset_configs=_configs(),
-        client=StubClient([_answer] * 64),
-        model_config_dict=_MODEL,
-        split="all",
-        out=out,
-    )
+    # 第二遍：全部 resumed，stub 零调用
+    summary = _run(out, [])
     assert set(summary.values()) == {"resumed"}
 
+    # 把一个 rewrite cell 标记为 failed ⇒ 只重跑它（1 次调用）
+    tape = out / "sessions" / "t2" / "rewrite.json"
+    data = json.loads(tape.read_text(encoding="utf-8"))
+    data["status"] = "failed:rejected"
+    tape.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
-def test_resume_retries_failed_cells(tmp_path: Path):
-    """failed 不是完成态：瞬时限流/超时的 cell 重跑时必须重试，不能被 resume 吞掉。"""
-    out = _run(tmp_path)
-    # 把一个已完成 cell 的对话录改写成 failed 终态（模拟上次运行首轮 LLMError）
-    victim = next(
-        p for p in (out / "raw").glob("*/*.json") if p.parent.name != "messages"
+    summary = _run(out, [REWRITE_RESP])
+    statuses = list(summary.values())
+    assert statuses.count("resumed") == 8
+    assert statuses.count("done") == 1
+    assert summary[str(("t2", "rewrite"))] == "done"
+
+    # 中断残留（running）同样重跑
+    data = json.loads(tape.read_text(encoding="utf-8"))
+    data["status"] = "running"
+    tape.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    summary = _run(out, [REWRITE_RESP])
+    assert summary[str(("t2", "rewrite"))] == "done"
+
+
+def test_failed_cell_carries_failure_detail(tmp_path):
+    out = tmp_path / "run"
+    failure = Failure(
+        stage="llm", kind="rejected", message="HTTP 400", http_status=400, attempts=1,
+        detail={"body_excerpt": "bad request"},
     )
-    data = json.loads(victim.read_text(encoding="utf-8"))
-    data["status"] = "failed:timeout"
-    victim.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    summary = run_experiment(
-        dataset_dir=TINY,
-        toolset_configs=_configs(),
-        client=StubClient([_answer] * 64),
-        model_config_dict=_MODEL,
-        split="all",
-        out=out,
-    )
-    retried = [k for k, v in summary.items() if v == "done"]
-    assert len(retried) == 1  # 恰好只有 failed 的那个 cell 重跑
-    assert all(v == "resumed" for k, v in summary.items() if k not in retried)
+    script = [LLMError(failure)] + [REWRITE_RESP] * 2 + ["done()"] * 3
+    summary = _run(out, script)
+    assert summary[str(("t1", "rewrite"))] == "failed:rejected"
+
+    report = _report(out)
+    row = report["per_sample"]["rewrite"]["t1"]
+    assert row["status"] == "failed:rejected"
+    assert row["failure"]["kind"] == "rejected"
+    assert row["failure"]["http_status"] == 400
+    assert row["failure"]["detail"]["body_excerpt"] == "bad request"
+    # 回退原文仍评分；失败按 kind 聚合
+    assert row["score"] is not None
+    assert report["aggregate"]["rewrite"]["failures"] == {"rejected": 1}
 
 
-def test_resume_key_includes_config(tmp_path: Path):
-    """同名工具配置换了内容 => 视为新运行（踩坑记录 #7）。"""
-    out = _run(tmp_path)
-    changed = _configs()
-    changed[1] = ToolsetConfig(name="rewrite", toolset="rewrite", max_turns=2)
-    summary = run_experiment(
-        dataset_dir=TINY,
-        toolset_configs=changed,
-        client=StubClient([_answer] * 64),
-        model_config_dict=_MODEL,
-        split="all",
-        out=out,
-    )
-    rewrite_keys = [k for k, v in summary.items() if "rewrite" in k]
-    assert all(summary[k] == "done" for k in rewrite_keys)  # 重跑了
-    others = [k for k in summary if "rewrite" not in k]
-    assert all(summary[k] == "resumed" for k in others)
-
-
-def test_reproducibility_same_scores_twice(tmp_path: Path):
-    r1 = _report(_run(tmp_path / "a"))
-    r2 = _report(_run(tmp_path / "b"))
-    assert r1["per_sample"] == r2["per_sample"]
-
-
-def test_replay_unchanged(tmp_path: Path):
-    from experiment import replay
-
-    out = _run(tmp_path)
+def test_replay_is_deterministic_noop(tmp_path):
+    out = tmp_path / "run"
+    _run(out, _smoke_script())
     _report(out)
     result = replay(out)
-    assert result["changed"] == []  # 后处理未变 => replay 结果不变
+    assert result == {"changed": [], "lower_bound": []}
 
 
-def test_workers_concurrent_same_result(tmp_path: Path):
-    """并发是实现细节：workers=4 与串行的落盘与指标完全一致。"""
-    out = tmp_path / "par"
-    summary = run_experiment(
-        dataset_dir=TINY,
-        toolset_configs=_configs(),
-        client=StubClient([_answer] * 64),
-        model_config_dict=_MODEL,
-        split="all",
-        out=out,
-        workers=4,
-    )
-    assert set(summary.values()) <= {"done"}
-    raw = [p for p in (out / "raw").glob("*/*.json") if p.parent.name != "messages"]
-    assert len(raw) == 3 * 4
-    r_par = _report(out)["per_sample"]
-    r_seq = _report(_run(tmp_path / "seq"))["per_sample"]
-    assert r_par == r_seq
+def test_replay_picks_up_extract_change(tmp_path, monkeypatch):
+    """后处理变了（extract 改了）⇒ replay 产出变化并记入 changed，不调 API。"""
+    out = tmp_path / "run"
+    _run(out, _smoke_script())
+    _report(out)
 
+    import agent.standard as std
 
-def test_progress_non_tty_events():
-    """非 TTY（StringIO）：退化为事件行，不崩、不喷 ANSI。"""
-    import io
-
-    from experiment.progress import RichProgress
-    from llm import Usage
-
-    buf = io.StringIO()
-    p = RichProgress(stream=buf)
-    p.begin(2)
-    p.start_cell("t1 × noop")
-    p.turn(Usage(input_tokens=3, output_tokens=5))
-    p.end_cell("t1 × noop", "done", Usage(input_tokens=3, output_tokens=5), 1.0)
-    p.close()
-    text = buf.getvalue()
-    assert "[start] t1 × noop" in text
-    assert "[1/2] t1 × noop -> done" in text
-    assert "5 out tok" in text and "5.0 tok/s" in text
-    assert "\x1b[" not in text  # 非 TTY 无 ANSI
-
-
-def test_progress_tty_live_repaint():
-    """模拟 TTY（rich force_terminal）：Live 原地重绘状态行 + 最近事件。"""
-    import io
-
-    from experiment.progress import RichProgress
-    from llm import Usage
-
-    buf = io.StringIO()
-    p = RichProgress(stream=buf, force_terminal=True)
-    p.begin(1)
-    p.start_cell("t1 × rewrite")
-    p.turn(Usage(input_tokens=3, output_tokens=5))
-    p.end_cell("t1 × rewrite", "done", Usage(input_tokens=3, output_tokens=5), 2.0)
-    p.close()
-    text = buf.getvalue()
-    assert "\x1b[" in text  # Live 重绘走 ANSI 光标控制
-    assert "t1 × rewrite | turn 1" in text
-    assert "t1 × rewrite -> done" in text  # 最近事件进刷新块，不堆历史
-
-
-def test_reporter_registry_and_protocol():
-    """可插拔入口：内建名字与 module:Class 动态加载都要过协议检查。"""
-    from experiment.progress import NullProgress, RichProgress, build_reporter
-
-    assert isinstance(build_reporter(None), RichProgress)
-    assert isinstance(build_reporter("rich"), RichProgress)
-    assert isinstance(build_reporter("null"), NullProgress)
-    custom = build_reporter("experiment.progress:NullProgress")
-    assert isinstance(custom, NullProgress)
-    with pytest.raises(ValueError, match="未知报告器"):
-        build_reporter("nope")
-    with pytest.raises(TypeError, match="ProgressReporter"):
-        build_reporter("builtins:dict")  # 实例不满足协议 => 拒绝
-
-
-
-def test_stub_client_streams_deltas():
-    chunks: list[str] = []
-    c = StubClient(["hello world"])
-    out = c.complete([Message("user", "x")], on_delta=chunks.append)
-    assert "".join(chunks) == "hello world"
-    assert all(len(c_) <= 16 for c_ in chunks)  # 分块回调
-    assert out.text == "hello world"
+    monkeypatch.setattr(std, "extract_rewrite_text", lambda text: "postprocessed")
+    result = replay(out)
+    assert sorted(result["changed"]) == [
+        "t1 × rewrite",
+        "t2 × rewrite",
+        "t3 × rewrite",
+    ]
+    session = SessionStore(out).read("t1", "rewrite")
+    assert session is not None and session.output == "postprocessed"

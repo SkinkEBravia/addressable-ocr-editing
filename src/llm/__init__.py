@@ -11,9 +11,9 @@ from llm.config import (
     model_config_from_dict,
     resolve_api_key,
 )
-from llm.errors import ConfigError, CredentialError, LLMError
+from llm.errors import ConfigError, CredentialError, Failure, LLMError
 from llm.stub import StubClient
-from llm.types import Completion, Message, Turn, Usage
+from llm.types import Completion, Message, Usage
 
 __all__ = [
     "LLMClient",
@@ -24,11 +24,11 @@ __all__ = [
     "load_env_file",
     "resolve_api_key",
     "LLMError",
+    "Failure",
     "ConfigError",
     "CredentialError",
     "StubClient",
     "Message",
     "Completion",
     "Usage",
-    "Turn",
 ]

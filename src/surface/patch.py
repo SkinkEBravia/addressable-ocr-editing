@@ -96,12 +96,24 @@ class PatchResult:
     snapshot_id: SnapshotId
     affected: tuple[AffectedBlock, ...]
     """受影响的块，按（新）文档序；removed 的块排在最后。"""
+    errors: tuple["SurfaceError", ...] = ()
+    """best_effort 模式下被跳过 op 的失败清单；atomic 模式恒为空（失败即抛）。"""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,
             "affected": [ab.to_dict() for ab in self.affected],
+            "errors": [e.to_dict() for e in self.errors],
         }
+
+
+APPLY_ATOMIC = "atomic"
+"""默认应用策略：整批原子，任一失败全批回滚（store 不变）。"""
+
+APPLY_BEST_EFFORT = "best_effort"
+"""逐条应用策略：op 按文本顺序逐条 degrade+apply+save，失败的跳过并记入
+``PatchResult.errors``，其余照常生效（假设：OCR 修复的 op 互不影响——
+链式叠加对成功 op 仍按文本顺序成立）。语法错误（ParseError）仍整批拒绝。"""
 
 
 def run_patch(
@@ -109,31 +121,86 @@ def run_patch(
     patch_text: str,
     strategy: AgentIdStrategy,
     annotator: Annotator,
+    *,
+    mode: str = APPLY_ATOMIC,
 ) -> PatchResult:
     """load(current) -> parse -> degrade -> apply -> save -> 渲染受影响块。
 
-    失败抛 ``ParseError``（解析）或 ``SurfaceError``（降解 / apply）；
-    失败时 store 不变（save 只在全部 core op 成功应用之后执行）。
+    ``mode=atomic``（默认）：失败抛 ``ParseError``（解析）或
+    ``SurfaceError``（降解 / apply）；失败时 store 不变。
+    ``mode=best_effort``：语义失败逐条跳过、记入回执 ``errors``，
+    其余照常提交；只有 ParseError（语法）仍抛出。
     """
     snapshot = ir.load(store, ir.current(store))
     surface_ops = parse(patch_text)
     ref_map = present(snapshot, strategy, annotator).reference_map
-    entries = degrade(surface_ops, ref_map, snapshot)
-    core_ops = tuple(op for op, _ in entries)
-    try:
-        new_snapshot = ir.apply(snapshot, core_ops)
-    except OpError as exc:
-        raise _wrap_op_error(exc, entries) from exc
-    ir.save(store, new_snapshot)
+    if mode == APPLY_ATOMIC:
+        entries = degrade(surface_ops, ref_map, snapshot)
+        core_ops = tuple(op for op, _ in entries)
+        try:
+            new_snapshot = ir.apply(snapshot, core_ops)
+        except OpError as exc:
+            raise _wrap_op_error(exc, entries) from exc
+        ir.save(store, new_snapshot)
+        affected = _affected(
+            old=snapshot,
+            new=new_snapshot,
+            surface_ops=surface_ops,
+            old_ref_map=ref_map,
+            strategy=strategy,
+            annotator=annotator,
+        )
+        return PatchResult(snapshot_id=new_snapshot.id, affected=affected)
+    if mode == APPLY_BEST_EFFORT:
+        return _run_best_effort(
+            store, snapshot, surface_ops, ref_map, strategy, annotator
+        )
+    raise ValueError(f"unknown apply mode: {mode!r}")
+
+
+def _run_best_effort(
+    store: Store,
+    snapshot: DocumentSnapshot,
+    surface_ops: tuple[SurfaceOp, ...],
+    ref_map: ReferenceMap,
+    strategy: AgentIdStrategy,
+    annotator: Annotator,
+) -> PatchResult:
+    """逐条应用：id 一律按 patch 前的 View 解析（07 规则），内容读取看
+    当前状态（成功 op 间链式叠加保持）。失败的 op 跳过，store 停在前一个
+    成功状态。"""
+    import dataclasses
+
+    old = snapshot
+    current = snapshot
+    errors: list[SurfaceError] = []
+    applied: list[SurfaceOp] = []
+    for i, sop in enumerate(surface_ops):
+        try:
+            entries = degrade((sop,), ref_map, current)
+            new_snapshot = ir.apply(current, tuple(op for op, _ in entries))
+        except SurfaceError as exc:  # 降解失败（未知 id / PATTERN_NOT_FOUND）
+            errors.append(dataclasses.replace(exc, surface_index=i))
+            continue
+        except OpError as exc:  # apply 失败
+            errors.append(
+                dataclasses.replace(_wrap_op_error(exc, entries), surface_index=i)
+            )
+            continue
+        ir.save(store, new_snapshot)
+        current = new_snapshot
+        applied.append(sop)
     affected = _affected(
-        old=snapshot,
-        new=new_snapshot,
-        surface_ops=surface_ops,
+        old=old,
+        new=current,
+        surface_ops=tuple(applied),
         old_ref_map=ref_map,
         strategy=strategy,
         annotator=annotator,
     )
-    return PatchResult(snapshot_id=new_snapshot.id, affected=affected)
+    return PatchResult(
+        snapshot_id=current.id, affected=affected, errors=tuple(errors)
+    )
 
 
 def _wrap_op_error(exc: OpError, entries: tuple[CoreOpEntry, ...]) -> SurfaceError:

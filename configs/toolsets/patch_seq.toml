@@ -1,0 +1,9 @@
+# patch_seq：逐单元顺序 patch（一文档一场对话，每 chunk 一次机会，无反馈）。
+# best_effort 应用（失败 op 跳过）+ 隐去 append/merge（本任务零使用，见
+# Docs/impl-status.md）。max_turns 只是安全上限：实际轮数 = chunk 数。
+toolset    = "patch_seq"
+max_turns  = 64
+apply_mode = "best_effort"
+hide_ops   = ["append", "merge"]
+partition  = "lines"
+block_size = 400
