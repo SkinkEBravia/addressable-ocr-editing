@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from datasetkit import ScoreError, load_dataset, resolve
@@ -23,7 +23,21 @@ from llm import Usage
 
 from experiment.store import SessionStore
 
-__all__ = ["build_report", "write_report"]
+__all__ = ["build_report", "write_report", "resolve_dataset_dir"]
+
+
+def resolve_dataset_dir(recorded: str) -> Path:
+    """报告里记录的数据集目录 -> 本机可用路径。
+
+    记录可能是另一台机器/容器的绝对路径（甚至是异 OS 的路径形式）：
+    本机不存在时回退到 ``datasets/<目录名>``（项目布局约定），
+    保证 report-only / replay 可移植。
+    """
+    p = Path(recorded)
+    if p.is_dir():
+        return p
+    name = PureWindowsPath(recorded).name  # Windows 形式（反斜杠）也能取到目录名
+    return Path("datasets") / (name or p.name)
 
 
 def _usage_row(session) -> dict:

@@ -76,7 +76,9 @@ def replay(
     report_path = out / "report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     ds = report["dataset"]
-    dataset = load_dataset(ds["dir"])
+    from experiment.report import resolve_dataset_dir
+
+    dataset = load_dataset(resolve_dataset_dir(ds["dir"]))
     tasks = {
         t.task_id: t
         for t in resolve(

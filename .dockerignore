@@ -1,0 +1,12 @@
+.git/
+.venv/
+.env
+runs/
+related_agents/
+Dump/
+.pytest-tmp/
+.pytest_cache/
+.hypothesis/
+__pycache__/
+*.pyc
+.claude/

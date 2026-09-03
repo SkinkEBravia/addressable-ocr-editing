@@ -77,6 +77,28 @@ report 的 `failure` 段（`rejected` / `incomplete` / `timeout` …，含 http_
 uv run pytest          # 离线测试（含 configs/ 一致性冒烟）；真实 API 冒烟用 -m live
 ```
 
+## 容器（Docker）
+
+根目录 `Dockerfile` 构建的实验镜像：依赖全预装（venv 在 `/opt`），代码/配置/数据/runs 经 bind mount 与宿主同步——**改代码不用更新容器，挂载即生效**。
+
+```powershell
+# 构建（代码变动不需要重建；只有 pyproject/uv.lock 变了才重建）
+docker build -t bdpc-exp .
+
+# 进容器交互式实验（.env 经 --env-file 注入，不进镜像）
+docker run --rm -it --env-file .env `
+  -v ${PWD}/src:/app/src -v ${PWD}/configs:/app/configs `
+  -v ${PWD}/datasets:/app/datasets -v ${PWD}/runs:/app/runs `
+  -v ${PWD}/tests:/app/tests bdpc-exp
+
+# 容器内：命令与宿主完全一致
+uv run python -m experiment --dataset datasets/hipe_2026 \
+    --toolsets noop,rewrite,patch --model volc-deepseek-v4-flash \
+    --split dev --loaders icdar2017/en/doc --out runs/my-first --workers 4
+```
+
+磁带与报告直接写回宿主 `runs/`；容器内 bash 原生可用（swe_bash 后端在 Linux 下与 Windows Git Bash 行为一致）。
+
 ## 设计文档
 
 从 [Docs/Design/00-dataflow.md](Docs/Design/00-dataflow.md) 的文档索引进；

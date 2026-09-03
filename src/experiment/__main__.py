@@ -169,7 +169,9 @@ def _emit_report(args, out: Path, model_config=None, toolset_configs=None, instr
         old = json.loads((out / "report.json").read_text(encoding="utf-8"))
         models = old["models"]
         toolsets = old["toolsets"]
-        dataset_dir = old["dataset"]["dir"]
+        from experiment.report import resolve_dataset_dir
+
+        dataset_dir = resolve_dataset_dir(old["dataset"]["dir"])
         split = old["dataset"]["split"]
         loader_keys = old["dataset"].get("loader_keys")
         meta_filter = old["dataset"].get("meta")
