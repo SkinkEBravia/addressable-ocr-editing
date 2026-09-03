@@ -26,13 +26,10 @@ uv run python -m experiment --dataset datasets/hipe_2026 `
     --out runs/en5-doc-anchors --workers 3
 ```
 
-### bash（容器内）
+### bash（容器内，先经 README「容器」节的 docker run 进入）
 
 ```bash
-docker run --rm --env-file .env \
-  -v $PWD/src:/app/src -v $PWD/configs:/app/configs \
-  -v $PWD/datasets:/app/datasets -v $PWD/runs:/app/runs \
-  bdpc-exp uv run python -m experiment --dataset datasets/hipe_2026 \
+uv run python -m experiment --dataset datasets/hipe_2026 \
     --toolsets noop,find_replace,swe_edit --model volc-deepseek-v4-flash \
     --split dev --loaders icdar2017/en/doc \
     --ids "icdar2017/periodical__eng_periodical-5" \
