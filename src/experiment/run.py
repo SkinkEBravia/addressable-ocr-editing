@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -111,7 +112,8 @@ def run_experiment(
         old = store.resumable(task.task_id, cfg.name, cfg_hash, legacy=legacy_hash)
         if old is not None:
             summary[str((task.task_id, cfg.name))] = "resumed"
-            progress.end_cell(label, old, 0.0)
+            # 事件行要显示 resumed 而非磁带上的旧终态（done/budget_exceeded）
+            progress.end_cell(label, dataclasses.replace(old, status="resumed"), 0.0)
             return
         workdir = out / "work" / task.task_id / cfg.name
         session, messages = start_session(
