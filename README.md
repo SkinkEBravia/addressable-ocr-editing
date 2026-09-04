@@ -85,12 +85,22 @@ uv run pytest          # 离线测试（含 configs/ 一致性冒烟）；真实
 # 构建（代码变动不需要重建；只有 pyproject/uv.lock 变了才重建）
 docker build -t bdpc-exp .
 
-# 进容器交互式实验（.env 经 --env-file 注入，不进镜像）
+# 进容器交互式实验（.env 经 --env-file 注入，不进镜像）——PowerShell：
 docker run --rm -it --env-file .env `
   -v ${PWD}/src:/app/src -v ${PWD}/configs:/app/configs `
   -v ${PWD}/datasets:/app/datasets -v ${PWD}/runs:/app/runs `
   -v ${PWD}/tests:/app/tests bdpc-exp
+```
 
+```bash
+# 进容器——Git Bash（必须加 MSYS_NO_PATHCONV=1，否则 -v 的 /app 被路径转换吃掉）：
+MSYS_NO_PATHCONV=1 docker run --rm -it --env-file .env \
+  -v ${PWD}/src:/app/src -v ${PWD}/configs:/app/configs \
+  -v ${PWD}/datasets:/app/datasets -v ${PWD}/runs:/app/runs \
+  -v ${PWD}/tests:/app/tests bdpc-exp
+```
+
+```bash
 # 容器内：命令与宿主完全一致
 uv run python -m experiment --dataset datasets/hipe_2026 \
     --toolsets noop,rewrite,patch --model volc-deepseek-v4-flash \
