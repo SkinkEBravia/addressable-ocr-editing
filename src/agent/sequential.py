@@ -51,25 +51,21 @@ DOC_SEPARATOR = "\n"
 """单元拼接分隔符（与数据集装载一致）。"""
 
 
-def _split_units_and_sep(text: str, boundaries: Any) -> tuple[tuple[str, ...], str]:
-    """按 unit_boundaries（各单元起始偏移）切回单元，并自适应推断单元间分隔符（默认 "\n"）。"""
-    if not isinstance(boundaries, (list, tuple)) or len(boundaries) < 2:
-        return (text,), DOC_SEPARATOR
-    b1 = boundaries[1]
-    if len(text) > b1 + 2 and text[b1:b1 + 3] == "---":
-        sep = "\n---\n"
-        chunks = [text[: b1 - 1]]
-        start = b1 + 4
-        chunks.append(text[start:])
-        return tuple(chunks), sep
-    sep_len = len(DOC_SEPARATOR)
-    ends = [b - sep_len for b in boundaries[1:]] + [len(text)]
-    return tuple(text[s:e] for s, e in zip(boundaries, ends)), DOC_SEPARATOR
-
-
 def _split_units(text: str, boundaries: Any) -> tuple[str, ...]:
-    chunks, _ = _split_units_and_sep(text, boundaries)
-    return chunks
+    """按 unit_boundaries（各单元起始偏移）切回单元；无则整体为单单元。
+
+    单元间分隔符恒为数据集装载口径 DOC_SEPARATOR（"\n"）。
+    """
+    if not boundaries or not isinstance(boundaries, (list, tuple)) or len(boundaries) < 2:
+        return (text,)
+    units: list[str] = []
+    for i, start in enumerate(boundaries):
+        if i + 1 < len(boundaries):
+            end = boundaries[i + 1] - len(DOC_SEPARATOR)
+        else:
+            end = len(text)
+        units.append(text[start:end])
+    return tuple(units)
 
 
 SEQ_REWRITE_CLAUSE = """\
@@ -324,14 +320,14 @@ class SweEditSeqToolSet:
     def make_tool_state(
         self, task_input: str, task_meta: dict, workdir: Path
     ) -> dict[str, Any]:
-        chunks, sep = _split_units_and_sep(task_input, task_meta.get("unit_boundaries"))
+        chunks = _split_units(task_input, task_meta.get("unit_boundaries"))
         stores = []
         for i, chunk in enumerate(chunks):
             store = ir.Store(workdir / f"unit_{i}" / "session")
             source = sourceio.SourceText(text=chunk, encoding="utf-8", bom=b"")
             ir.save(store, ir.birth(source, partition.partition_lines(source)))
             stores.append(store)
-        return {"stores": stores, "index": 0, "meta": task_meta, "sep": sep}
+        return {"stores": stores, "index": 0, "meta": task_meta}
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return self._render(tool_state, 0)
@@ -366,8 +362,7 @@ class SweEditSeqToolSet:
             reconstruction.reconstruct(ir.load(s, ir.current(s))).text
             for s in tool_state["stores"]
         ]
-        sep = tool_state.get("sep", DOC_SEPARATOR)
-        return _source(sep.join(texts))
+        return _source(DOC_SEPARATOR.join(texts))
 
 
 FIND_REPLACE_SEQ_CLAUSE = """\
@@ -388,8 +383,8 @@ class FindReplaceSeqToolSet:
     def make_tool_state(
         self, task_input: str, task_meta: dict, workdir: Path
     ) -> dict[str, Any]:
-        chunks, sep = _split_units_and_sep(task_input, task_meta.get("unit_boundaries"))
-        return {"chunks": list(chunks), "index": 0, "meta": task_meta, "sep": sep}
+        chunks = _split_units(task_input, task_meta.get("unit_boundaries"))
+        return {"chunks": list(chunks), "index": 0, "meta": task_meta}
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return tool_state["chunks"][0]
@@ -416,8 +411,7 @@ class FindReplaceSeqToolSet:
         )
 
     def extract(self, tool_state: dict, session: Session) -> SourceText:
-        sep = tool_state.get("sep", DOC_SEPARATOR)
-        return _source(sep.join(tool_state["chunks"]))
+        return _source(DOC_SEPARATOR.join(tool_state["chunks"]))
 
 
 class PatchGlobalSeqToolSet:
@@ -446,7 +440,7 @@ class PatchGlobalSeqToolSet:
     def make_tool_state(
         self, task_input: str, task_meta: dict, workdir: Path
     ) -> dict[str, Any]:
-        chunks, sep = _split_units_and_sep(task_input, task_meta.get("unit_boundaries"))
+        chunks = _split_units(task_input, task_meta.get("unit_boundaries"))
         stores = []
         for i, chunk in enumerate(chunks):
             store = ir.Store(workdir / f"unit_{i}" / "session")
@@ -457,7 +451,7 @@ class PatchGlobalSeqToolSet:
                 result = partition.partition_chars(source, self._block_size)
             ir.save(store, ir.birth(source, result))
             stores.append(store)
-        return {"stores": stores, "index": 0, "meta": task_meta, "sep": sep}
+        return {"stores": stores, "index": 0, "meta": task_meta}
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return self._render(tool_state, 0)
@@ -483,7 +477,13 @@ class PatchGlobalSeqToolSet:
                 surface_ops = ()
             by_chunk: dict[int, list[surface.SurfaceOp]] = {}
             for op in surface_ops:
-                target_id = getattr(op, "id", None) or getattr(op, "anchor_id", None)
+                # 按 op 的主 id 路由（surface ops 的字段：id / anchor / a）
+                target_id = None
+                for attr in ("id", "anchor", "a"):
+                    v = getattr(op, attr, None)
+                    if isinstance(v, str):
+                        target_id = v
+                        break
                 chunk_idx = tool_state["index"]
                 if target_id and ":" in target_id:
                     p = target_id.split(":", 1)[0]
@@ -519,8 +519,7 @@ class PatchGlobalSeqToolSet:
             reconstruction.reconstruct(ir.load(store, ir.current(store))).text
             for store in tool_state["stores"]
         ]
-        sep = tool_state.get("sep", DOC_SEPARATOR)
-        return _source(sep.join(texts))
+        return _source(DOC_SEPARATOR.join(texts))
 
 
 SWE_EDIT_GLOBAL_SEQ_CLAUSE = """\
@@ -544,14 +543,14 @@ class SweEditGlobalSeqToolSet:
     def make_tool_state(
         self, task_input: str, task_meta: dict, workdir: Path
     ) -> dict[str, Any]:
-        chunks, sep = _split_units_and_sep(task_input, task_meta.get("unit_boundaries"))
+        chunks = _split_units(task_input, task_meta.get("unit_boundaries"))
         stores = []
         for i, chunk in enumerate(chunks):
             store = ir.Store(workdir / f"unit_{i}" / "session")
             source = sourceio.SourceText(text=chunk, encoding="utf-8", bom=b"")
             ir.save(store, ir.birth(source, partition.partition_lines(source)))
             stores.append(store)
-        return {"stores": stores, "index": 0, "meta": task_meta, "sep": sep}
+        return {"stores": stores, "index": 0, "meta": task_meta}
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return self._render(tool_state, 0)
@@ -593,8 +592,7 @@ class SweEditGlobalSeqToolSet:
             reconstruction.reconstruct(ir.load(s, ir.current(s))).text
             for s in tool_state["stores"]
         ]
-        sep = tool_state.get("sep", DOC_SEPARATOR)
-        return _source(sep.join(texts))
+        return _source(DOC_SEPARATOR.join(texts))
 
 
 FIND_REPLACE_GLOBAL_SEQ_CLAUSE = """\
@@ -616,8 +614,8 @@ class FindReplaceGlobalSeqToolSet:
     def make_tool_state(
         self, task_input: str, task_meta: dict, workdir: Path
     ) -> dict[str, Any]:
-        chunks, sep = _split_units_and_sep(task_input, task_meta.get("unit_boundaries"))
-        return {"chunks": list(chunks), "index": 0, "meta": task_meta, "sep": sep}
+        chunks = _split_units(task_input, task_meta.get("unit_boundaries"))
+        return {"chunks": list(chunks), "index": 0, "meta": task_meta}
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return self._render(tool_state, 0)
@@ -646,5 +644,4 @@ class FindReplaceGlobalSeqToolSet:
         )
 
     def extract(self, tool_state: dict, session: Session) -> SourceText:
-        sep = tool_state.get("sep", DOC_SEPARATOR)
-        return _source(sep.join(tool_state["chunks"]))
+        return _source(DOC_SEPARATOR.join(tool_state["chunks"]))

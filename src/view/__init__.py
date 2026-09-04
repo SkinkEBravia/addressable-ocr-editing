@@ -7,7 +7,6 @@
 from view.defaults import (
     blockkey_as_is,
     cat_n,
-    file_header,
     line_number,
     prefixed_blockkey,
     xml_ish,
@@ -38,7 +37,6 @@ __all__ = [
     "render_blocks",
     "blockkey_as_is",
     "prefixed_blockkey",
-    "file_header",
     "xml_ish",
     "line_number",
     "cat_n",

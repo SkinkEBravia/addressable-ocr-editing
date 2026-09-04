@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from ir import Block
 
-from view.types import AgentBlockId
+from view.types import AgentBlockId, AgentIdStrategy, Annotator
 
-__all__ = ["blockkey_as_is", "xml_ish", "line_number", "cat_n"]
+__all__ = ["blockkey_as_is", "prefixed_blockkey", "xml_ish", "line_number", "cat_n"]
 
 
 def blockkey_as_is(block: Block, index: int) -> AgentBlockId:
@@ -39,11 +39,6 @@ def xml_ish(agent_id: AgentBlockId, content: str) -> str:
     因此全量 payload 直接按序拼接各块标注即得。
     """
     return f'<x id="{agent_id}"\\>\n{content}\n</x>\n'
-
-
-def file_header(filename: str, annotator: Annotator | None = None) -> Annotator:
-    """标注包装：保留基础 annotator 逐块行为。"""
-    return annotator if annotator is not None else xml_ish
 
 
 def line_number(block: Block, index: int) -> AgentBlockId:

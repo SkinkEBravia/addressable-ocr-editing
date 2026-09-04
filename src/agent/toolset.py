@@ -48,10 +48,6 @@ class ToolResult:
     feedback: str  # 原样作为 user 消息进下一轮
     finish: bool = False
 
-    @property
-    def output(self) -> str:
-        return self.feedback
-
 
 class ToolParseError(Exception):
     """方言解析失败；reason 作为 feedback 进下一轮。"""

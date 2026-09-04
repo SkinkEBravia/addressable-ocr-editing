@@ -263,16 +263,11 @@ def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str,
     fixed_sub = fixed_del = 0
     broken_sub = broken_del = 0
     missed_sub = missed_del = 0
-    i_missing_at = [0] * (n_g + 1)
-
     for idx in range(n_g):
         s_i = status_i[idx]
         s_h = status_h[idx]
         i_ok = (s_i == "equal")
         h_ok = (s_h == "equal")
-
-        if s_i == "delete":
-            i_missing_at[idx] += 1
 
         if i_ok and not h_ok:
             if s_h == "substitute":

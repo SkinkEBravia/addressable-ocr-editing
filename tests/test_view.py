@@ -20,7 +20,6 @@ from view import (
     ReferenceMap,
     ViewError,
     blockkey_as_is,
-    file_header,
     prefixed_blockkey,
     present,
     render_blocks,
@@ -165,11 +164,6 @@ class TestPrefixedAndFileView:
         block = Block(key="b1", content="hello", attrs={"start": 0})
         strategy = prefixed_blockkey("c0")
         assert strategy(block, 0) == "c0:b1"
-
-    def test_file_header_annotator(self) -> None:
-        annotator = file_header("chunk_0.txt", xml_ish)
-        out = annotator("c0:b1", "sample content")
-        assert out == '<x id="c0:b1"\\>\nsample content\n</x>\n'
 
     def test_present_with_file_and_prefix(self) -> None:
         snapshot = _snapshot("一二三四五六", size=3)

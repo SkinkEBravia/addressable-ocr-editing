@@ -39,9 +39,10 @@ cmer 一致）做两次：
 1. **原文自带的插入（$ins_I$）**：计入 $errors_I$（OCR 自身的幻象/多余字符）。
    - H **保留**了这些插入：属于欠修未改，记为 **fixed-none / missed-ins**；
    - H **删除**了这些插入：成功剔除原文多余字符，记为 **fixed-ins-del**。
-2. **H 相对 I 主动新增的插入（$\max(0, ins_H - ins_I)$）**：
-   - H 在「I 有缺失错误（delete）」处插入：补上了原文缺的字符，记为 **fixed-ins**；
-   - H 在「I 原本正确/无缺失」处插入：凭空多写，记为 **broken-ins（真正由模型引入的幻觉）**。
+2. **H 相对 I 主动新增的插入（$\max(0, ins_H - ins_I)$，按 gap 计数重叠）**：
+   全部记为 **broken-ins（模型引入的幻觉）**。
+   补上原文缺失字符的修复由 2×2 表的 fixed-del 承担（H 在 I 删除处对齐正确），
+   不单列 fixed-ins。
 
 同理，H 相对 G 的**删除**里：删掉「I 中的错误内容」是修复（fixed-delete），
 删掉「I 中正确的内容」是内容丢失（broken-delete，幻觉的另一面）。
@@ -49,7 +50,7 @@ cmer 一致）做两次：
 ### 产出计数
 
 ```text
-fixed   = fixed-sub + fixed-del + fixed-ins + fixed-ins-del  # 修对的（含改对、补缺、剔除原文多余字符）
+fixed   = fixed-sub + fixed-del + fixed-ins-del  # 修对的（含改对、补缺、剔除原文多余字符）
 broken  = broken-sub + broken-del + broken-ins               # 改错 + 幻觉（改坏、误删、凭空多写）
 missed  = missed-sub + missed-del + missed-ins               # 没修掉的（替换未改、缺字未补、多字未删）
 kept    = 原本正确且未被触碰的
