@@ -102,9 +102,11 @@ class RichProgress:
         self._total = 0
         self._done = 0
         self._label = ""
-        self._turns = 0
-        self._cell_start = 0.0
-        self._out_tokens = 0  # usage 累计（端点精确值）
+        self._run_start = 0.0
+        # 全局吞吐口径（并发正确）：token 按 cell 累计求和；增量窗跨 cell 共享，
+        # start_cell 不得清空（否则 N 路并发时窗口被反复清零，TPS 恒显缺失）
+        self._active: set[str] = set()
+        self._cell_out: dict[str, int] = {}  # label -> 该 cell 最新累计 out tokens
         self._delta_events: collections.deque = collections.deque()  # (t, 字符数)
         self._last_delta: float | None = None  # 最近一次增量的时刻（停滞诊断）
         self._last_event = ""
@@ -114,6 +116,12 @@ class RichProgress:
     def begin(self, total: int) -> None:
         with self._lock:
             self._total = total
+            self._done = 0
+            self._run_start = time.monotonic()
+            self._active.clear()
+            self._cell_out.clear()
+            self._delta_events.clear()
+            self._last_delta = None
             if self._tty and self._live is None:
                 from rich.live import Live
 
@@ -136,12 +144,9 @@ class RichProgress:
 
     def start_cell(self, label: str) -> None:
         with self._lock:
-            self._label = label
-            self._turns = 0
-            self._cell_start = time.monotonic()
-            self._out_tokens = 0
-            self._delta_events.clear()
-            self._last_delta = None
+            self._label = label  # 最近启动的 cell（并发下仅作指示）
+            self._active.add(label)
+            self._cell_out.setdefault(label, 0)
             if self._tty:
                 self._refresh_locked()
             else:
@@ -149,7 +154,7 @@ class RichProgress:
                 self._stream.flush()
 
     def delta(self, text: str) -> None:
-        """流式观察：只计数（进时间窗，滚动 TPS 估值），不渲染模型输出文本。"""
+        """流式观察：只计数（进全局时间窗，滚动 TPS 估值），不渲染模型输出文本。"""
         with self._lock:
             now = time.monotonic()
             self._delta_events.append((now, len(text)))
@@ -157,16 +162,17 @@ class RichProgress:
 
     def turn(self, session: Session) -> None:
         with self._lock:
-            self._turns = len(session.turns)
+            label = f"{session.task_id} × {session.toolset}"
             usage = session.usage
             if usage is not None:
-                self._out_tokens = usage.output_tokens
+                self._cell_out[label] = usage.output_tokens  # 该 cell 累计值，覆盖不累加
             if self._tty:
                 self._refresh_locked()
 
     def end_cell(self, label: str, session: Session, elapsed_s: float) -> None:
         with self._lock:
             self._done += 1
+            self._active.discard(label)
             usage = session.usage
             tokens = usage.output_tokens if usage is not None else 0
             tps = tokens / elapsed_s if elapsed_s > 0 else 0.0
@@ -198,17 +204,18 @@ class RichProgress:
 
     def _status_line_locked(self) -> str:
         now = time.monotonic()
-        elapsed = now - self._cell_start
+        elapsed = now - self._run_start
+        total_out = sum(self._cell_out.values())
         tps = self._windowed_tps_locked(now)
         if tps is not None:
             rate = f"~{tps:.1f} tok/s/{_TPS_WINDOW_S:.0f}s窗"
         elif self._last_delta is None:
-            rate = "- tok/s"  # 本 cell 尚无增量（未流式或刚启动）
+            rate = "- tok/s"  # 尚无增量（未流式或刚启动）
         else:
             rate = f"~0 tok/s（{now - self._last_delta:.0f}s 无增量）"  # 停滞指示
         return (
-            f"[{self._done}/{self._total}] {self._label} | turn {self._turns + 1} "
-            f"| {elapsed:.0f}s | {self._out_tokens} out tok | {rate}"
+            f"[{self._done}/{self._total}] {len(self._active)} active | "
+            f"{self._label} | {elapsed:.0f}s | {total_out} out tok | {rate}"
         )
 
     def _renderable_locked(self) -> Any:
