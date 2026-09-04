@@ -38,15 +38,19 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 
 ## 结果
 
-| arm | status | cmer ↓ | Δ vs noop | out tokens | reasoning 占比 |
-|---|---|---|---|---|---|
-| noop | done | 0.0928 | — | 0 | — |
-| rewrite | done | 0.0473 | -0.0455 | 61.2k | 93.4% |
-| patch-1turn | budget_exceeded（设计内） | 0.0346 | -0.0583 | 83.2k | 91.9% |
+| arm | status | cmer ↓ | Δ vs noop | fixed ↑ | missed ↓ | broken ↓ | halluc ↓ | out tokens | reasoning 占比 |
+|---|---|---|---|---|---|---|---|---|---|
+| noop | done | 0.0928 | — | 0.0% | 100.0% | 0.0% | 0.0% | 0 | — |
+| rewrite | done | 0.0473 | -0.0455 | **78.82%** | **21.18%** | **2.92%** | **0.99%** | 61.2k | 93.4% |
+| patch-1turn | budget_exceeded（设计内） | **0.0346** | **-0.0583** | 71.27% | 28.73% | **0.78%** | **0.31%** | 83.2k | 91.9% |
+
+*注：各 arm 严格满足 fixed + missed ≡ 100.0% 原文错误基数。*
 
 ## 读法与结论
 
-- patch 单轮反超 rewrite 0.0128——best_effort 下 60/61 条 op 生效，唯一失败是模型自己引错原文（PATTERN_NOT_FOUND），原子批语义下会全批陪葬。
+- **patch 单轮反超 rewrite 0.0128 的本质是「抗过修与抑幻觉」**：
+  - 传统 CMER 只能看到 patch 胜出，新指标揭示了深层原因：rewrite 虽修对了更多错（78.82% vs 71.27%），但在全篇重写中造成了高达 **2.92% 的过修改坏率和 0.99% 的幻觉插入**；
+  - patch 将**改坏率死死压在 0.78%（仅为 rewrite 的 1/4）、幻觉仅 0.31%（仅为 rewrite 的 1/3）**！大文本修复的关键在于“不把原本正确的内容改坏”。
 - 结论：单轮 doc 粒度，**patch(块锚 + best_effort) > rewrite > noop**。
 - 教训沉淀：patch-1turn 的 status 恒为 budget_exceeded（没机会说 done()），看指标不看 status。
 

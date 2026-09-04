@@ -223,51 +223,166 @@ def _cmer(reference: str, hypothesis: str) -> float:
     return mer_from_counts(out.hits, out.substitutions, out.deletions, out.insertions)
 
 
+def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
+    """计算细粒度分解指标：fixed_rate, broken_rate, halluc_ins, missed_rate。
+
+    对应 Docs/HIPE-metrics-decomposition.md。
+    """
+    from hipe_ocrepair_scorer.ocrepair_eval import norm
+    from jiwer import process_characters
+
+    norm_g = norm(reference)
+    norm_i = norm(ocr)
+    norm_h = norm(hypothesis)
+    n_g = len(norm_g)
+
+    align_i = process_characters(norm_g, norm_i)
+    align_h = process_characters(norm_g, norm_h)
+
+    status_i = [None] * n_g
+    status_h = [None] * n_g
+    ins_i = [0] * (n_g + 1)
+    ins_h = [0] * (n_g + 1)
+
+    if align_i.alignments:
+        for chunk in align_i.alignments[0]:
+            if chunk.type == "insert":
+                ins_i[chunk.ref_start_idx] += (chunk.hyp_end_idx - chunk.hyp_start_idx)
+            else:
+                for idx in range(chunk.ref_start_idx, chunk.ref_end_idx):
+                    status_i[idx] = chunk.type
+
+    if align_h.alignments:
+        for chunk in align_h.alignments[0]:
+            if chunk.type == "insert":
+                ins_h[chunk.ref_start_idx] += (chunk.hyp_end_idx - chunk.hyp_start_idx)
+            else:
+                for idx in range(chunk.ref_start_idx, chunk.ref_end_idx):
+                    status_h[idx] = chunk.type
+
+    fixed_sub = fixed_del = 0
+    broken_sub = broken_del = 0
+    missed_sub = missed_del = 0
+    i_missing_at = [0] * (n_g + 1)
+
+    for idx in range(n_g):
+        s_i = status_i[idx]
+        s_h = status_h[idx]
+        i_ok = (s_i == "equal")
+        h_ok = (s_h == "equal")
+
+        if s_i == "delete":
+            i_missing_at[idx] += 1
+
+        if i_ok and not h_ok:
+            if s_h == "substitute":
+                broken_sub += 1
+            else:
+                broken_del += 1
+        elif not i_ok and h_ok:
+            if s_i == "substitute":
+                fixed_sub += 1
+            else:
+                fixed_del += 1
+        elif not i_ok and not h_ok:
+            if s_i == "substitute":
+                missed_sub += 1
+            else:
+                missed_del += 1
+
+    fixed_ins_del = 0
+    missed_ins = 0
+    broken_ins = 0
+
+    for idx in range(n_g + 1):
+        num_i = ins_i[idx]
+        num_h = ins_h[idx]
+
+        # 原文自带的多余插入字符：保留算欠修，删除算修复
+        missed_ins += min(num_i, num_h)
+        fixed_ins_del += max(0, num_i - num_h)
+
+        # 模型相对原文主动新增的多余插入字符：全部属于模型引入的幻觉
+        broken_ins += max(0, num_h - num_i)
+
+    fixed = fixed_sub + fixed_del + fixed_ins_del
+    broken = broken_sub + broken_del + broken_ins
+    missed = missed_sub + missed_del + missed_ins
+
+    errors_i = align_i.substitutions + align_i.deletions + align_i.insertions
+    correct_i = align_i.hits
+
+    fixed_rate = fixed / errors_i if errors_i > 0 else 0.0
+    missed_rate = missed / errors_i if errors_i > 0 else 0.0
+    broken_rate = broken / correct_i if correct_i > 0 else 0.0
+    denom_halluc = n_g + align_h.insertions
+    halluc_ins = broken_ins / denom_halluc if denom_halluc > 0 else 0.0
+
+    return {
+        "fixed_rate": fixed_rate,
+        "broken_rate": broken_rate,
+        "halluc_ins": halluc_ins,
+        "missed_rate": missed_rate,
+    }
+
+
+def _score_unit(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
+    """逐转写单元评分：cmer + cmer_hyp + 四维分解指标。"""
+    cmer = _cmer(reference, hypothesis)
+    cmer_hyp = _cmer(reference, ocr)
+    decomp = _decompose_alignment(reference, ocr, hypothesis)
+    return {
+        "cmer": cmer,
+        "cmer_hyp": cmer_hyp,
+        **decomp,
+    }
+
+
 class _Scorer:
     def score(self, prediction: str, task: Task) -> dict[str, float]:
         if task.reference is None:
             raise ScoreError(f"masked task 不出数: {task.task_id}")
         gold_units = task.meta.get("gold_units")
         if gold_units:  # doc 粒度：得分 = chunk 均值 + 方差（复用逐条评分）
+            ocr_chunks = task.input.split(DOC_SEPARATOR)
             if len(gold_units) == 1:
                 # 单 chunk（doc ≡ chunk 的子集常态）：无需拆分，直接逐条评分
+                ocr_text = ocr_chunks[0] if ocr_chunks else task.input
+                unit_res = _score_unit(gold_units[0], ocr_text, prediction)
                 return {
-                    "cmer": _cmer(gold_units[0], prediction),
+                    **unit_res,
                     "cmer_var": 0.0,
                     "n_chunks": 1.0,
-                    "cmer_hyp": _cmer(gold_units[0], task.input),
                     "chunks_aligned": 1.0,
                 }
             pred_chunks = prediction.split(DOC_SEPARATOR)
-            if len(pred_chunks) == len(gold_units):
-                values = [
-                    _cmer(g, p) for g, p in zip(gold_units, pred_chunks)
+            if len(pred_chunks) == len(gold_units) and len(ocr_chunks) == len(gold_units):
+                chunk_scores = [
+                    _score_unit(g, o, p)
+                    for g, o, p in zip(gold_units, ocr_chunks, pred_chunks)
                 ]
-                mean = sum(values) / len(values)
-                var = sum((v - mean) ** 2 for v in values) / len(values)  # 总体方差
-                hyp_values = [
-                    _cmer(g, p)
-                    for g, p in zip(gold_units, task.input.split(DOC_SEPARATOR))
-                ]
+                agg = {
+                    key: sum(cs[key] for cs in chunk_scores) / len(chunk_scores)
+                    for key in chunk_scores[0]
+                }
+                cmer_values = [cs["cmer"] for cs in chunk_scores]
+                mean_cmer = agg["cmer"]
+                var_cmer = sum((v - mean_cmer) ** 2 for v in cmer_values) / len(cmer_values)
                 return {
-                    "cmer": mean,
-                    "cmer_var": var,
-                    "n_chunks": float(len(values)),
-                    "cmer_hyp": sum(hyp_values) / len(hyp_values),
+                    **agg,
+                    "cmer_var": var_cmer,
+                    "n_chunks": float(len(chunk_scores)),
                     "chunks_aligned": 1.0,
                 }
             # 拼接结构被改坏（分隔符数量对不上）：回退整篇口径并标记
+            whole_res = _score_unit(task.reference, task.input, prediction)
             return {
-                "cmer": _cmer(task.reference, prediction),
+                **whole_res,
                 "cmer_var": 0.0,
                 "n_chunks": 1.0,
-                "cmer_hyp": _cmer(task.reference, task.input),
                 "chunks_aligned": 0.0,
             }
-        return {
-            "cmer": _cmer(task.reference, prediction),
-            "cmer_hyp": _cmer(task.reference, task.input),
-        }
+        return _score_unit(task.reference, task.input, prediction)
 
 
 def scorer() -> _Scorer:

@@ -32,15 +32,16 @@ cmer 一致）做两次：
 
 「错」在对齐里 = 该位置为替换（S）或删除（D）；「对」= 命中（H）。
 
-### 插入 run 的归属（幻觉分量）
+### 插入 run 的归属（原文自带多余字符 vs 模型主动新增插入）
 
-插入（I）不对齐任何金标位置，单独按锚点归属：
+插入（I）不对齐任何金标位置，单独按锚点与增量归属：
 
-| 插入方 | 语义 | 分类 |
-|---|---|---|
-| I 有插入（OCR 自带的插入错误） | — | 计入 I 的错误基数 |
-| H 在「I 有缺失错误」处插入 | 补上了原文缺的字符 | **fixed-insert** |
-| H 在「I 原本正确」处插入 | 凭空多写 | **broken-insert（幻觉）** |
+1. **原文自带的插入（$ins_I$）**：计入 $errors_I$（OCR 自身的幻象/多余字符）。
+   - H **保留**了这些插入：属于欠修未改，记为 **fixed-none / missed-ins**；
+   - H **删除**了这些插入：成功剔除原文多余字符，记为 **fixed-ins-del**。
+2. **H 相对 I 主动新增的插入（$\max(0, ins_H - ins_I)$）**：
+   - H 在「I 有缺失错误（delete）」处插入：补上了原文缺的字符，记为 **fixed-ins**；
+   - H 在「I 原本正确/无缺失」处插入：凭空多写，记为 **broken-ins（真正由模型引入的幻觉）**。
 
 同理，H 相对 G 的**删除**里：删掉「I 中的错误内容」是修复（fixed-delete），
 删掉「I 中正确的内容」是内容丢失（broken-delete，幻觉的另一面）。
@@ -48,9 +49,9 @@ cmer 一致）做两次：
 ### 产出计数
 
 ```text
-fixed   = fixed-sub + fixed-ins + fixed-del     # 修对的
-broken  = broken-sub + broken-ins + broken-del  # 改错 + 幻觉（插入幻觉与内容丢失）
-missed  = missed-sub + missed-del               # 没修掉的
+fixed   = fixed-sub + fixed-del + fixed-ins + fixed-ins-del  # 修对的（含改对、补缺、剔除原文多余字符）
+broken  = broken-sub + broken-del + broken-ins               # 改错 + 幻觉（改坏、误删、凭空多写）
+missed  = missed-sub + missed-del + missed-ins               # 没修掉的（替换未改、缺字未补、多字未删）
 kept    = 原本正确且未被触碰的
 ```
 

@@ -38,13 +38,15 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 
 ## 结果
 
-**终局（cmer ↓）**
+**终局（cmer ↓ 与错误分解指标）**
 
-| arm | status | cmer | Δ vs noop | out tokens | reasoning 占比 |
-|---|---|---|---|---|---|
-| noop | done | 0.0928 | — | 0 | — |
-| swe_edit | done（3 轮） | 0.0353 | -0.0576 | 71.9k | 89.1% |
-| find_replace | budget_exceeded（8 轮） | 0.0362 | -0.0567 | 163.6k | 90.7% |
+| arm | status | cmer | Δ vs noop | fixed ↑ | missed ↓ | broken ↓ | halluc ↓ | out tokens | reasoning 占比 |
+|---|---|---|---|---|---|---|---|---|---|
+| noop | done | 0.0928 | — | 0.0% | 100.0% | 0.0% | 0.0% | 0 | — |
+| swe_edit | done（3 轮） | 0.0353 | -0.0576 | 75.34% | 24.66% | **1.20%** | **0.44%** | 71.9k | 89.1% |
+| find_replace | budget_exceeded（8 轮） | 0.0366 | -0.0563 | **78.30%** | **21.70%** | 1.66% | 0.70% | 163.6k | 90.7% |
+
+*注：各 arm 严格满足 fixed + missed ≡ 100.0% 原文错误基数。*
 
 **cmer × 轮数（逐轮重放磁带；turn 0 = 未修复基线）**
 
@@ -63,9 +65,9 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 ## 读法与结论
 
 - **行号锚对模型最友好**：swe_edit 第二轮就一把 11 条 edit 全部生效、第三轮收工，72k out token 达到与单发 patch 同级质量，是反馈臂里最省钱的。
-- 字符串锚同质量但 2.3 倍 token（163.6k），且后 4 轮平台期+轻微回退（过度编辑）。
+- **细粒度指标印证了字符串锚的「过度编辑」本质**：find_replace 虽然修掉了最多的错（78.30% vs 75.34%），但由于 replace-all 语义缺乏行级作用域隔离，导致其**过修改坏率达到 1.66%（比 swe_edit 高 38%）、插入幻觉率达到 0.70%（比 swe_edit 高 59%）**；后 4 轮的平台期与轻微回退正源于此。
 - 两个锚点首轮都「先交一次学费」（parse 失败 / 无效替换）再靠反馈自愈——这正是多轮口径的意义；单轮下这些错误全是零变更。
-- 结论：**swe_edit ≈ find_replace ≈ 单发 patch（质量），swe_edit 成本最优**；块 id 锚的多轮对照已补齐（en5-doc-patch8t：patch 1 轮 0.0312 / 67.9k，三锚点双优居首）。
+- 结论：**swe_edit ≈ find_replace ≈ 单发 patch（净效果），swe_edit 成本与抗过修最优**；块 id 锚的多轮对照已补齐（en5-doc-patch8t：patch 1 轮 0.0312 / 67.9k，三锚点双优居首）。
 
 ## 资产与备注
 
