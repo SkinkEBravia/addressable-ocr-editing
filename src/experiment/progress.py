@@ -175,6 +175,7 @@ class RichProgress:
             self._active.discard(label)
             usage = session.usage
             tokens = usage.output_tokens if usage is not None else 0
+            self._cell_out[label] = tokens  # 覆盖式写入（resumed cell 也计入全局）
             tps = tokens / elapsed_s if elapsed_s > 0 else 0.0
             event = (
                 f"{label} -> {session.status} "

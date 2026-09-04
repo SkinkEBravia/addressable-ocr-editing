@@ -153,15 +153,19 @@ class SessionStore:
             output=data.get("output"),
         )
 
-    def resumable(self, task_id: str, toolset: str, config_hash: str) -> Session | None:
+    def resumable(
+        self, task_id: str, toolset: str, config_hash: str, *, legacy: str | None = None
+    ) -> Session | None:
         """可 resume 则返回磁带 Session，否则 None。
 
         完成态 = done / budget_exceeded；failed:* 与 running（中断残留）重跑。
+        legacy：旧配方（绝对路径 dataset_dir）算出的哈希，过渡期一并接受。
         """
         session = self.read(task_id, toolset)
         if session is None:
             return None
-        if session.config_hash != config_hash:
+        acceptable = {config_hash, *([legacy] if legacy else [])}
+        if session.config_hash not in acceptable:
             return None
         if session.status not in ("done", "budget_exceeded"):
             return None

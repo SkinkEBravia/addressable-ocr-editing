@@ -151,3 +151,17 @@ def test_replay_picks_up_extract_change(tmp_path, monkeypatch):
     ]
     session = SessionStore(out).read("t1", "rewrite")
     assert session is not None and session.output == "postprocessed"
+
+
+def test_resumable_accepts_legacy_hash(tmp_path):
+    """过渡兼容：旧配方（绝对路径 dataset_dir）算出的磁带哈希仍可 resume。"""
+    from agent import Budget, Session
+    from experiment import SessionStore
+
+    store = SessionStore(tmp_path / "out")
+    s = Session(task_id="t1", toolset="noop", config_hash="legacy-hash",
+                budget=Budget(), status="done", output="x")
+    store.write(s)
+    assert store.resumable("t1", "noop", "legacy-hash") is not None
+    assert store.resumable("t1", "noop", "new-hash") is None
+    assert store.resumable("t1", "noop", "new-hash", legacy="legacy-hash") is not None

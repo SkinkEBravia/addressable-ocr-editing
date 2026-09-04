@@ -66,12 +66,19 @@ def run_experiment(
     instruction = instruction if instruction is not None else dataset.default_instruction()
 
     dataset_params = {
-        "dataset_dir": str(Path(dataset_dir).resolve()),
+        # 环境无关的相对形式：宿主与容器都从仓库根跑同一条命令时，
+        # resume 键必须一致（否则换环境 = 静默全量重跑，血泪教训）
+        "dataset_dir": str(Path(dataset_dir)),
         "split": split,
         "loader_keys": loader_keys,
         "meta": meta_filter,
         "ids": ids,
         "limit": limit,
+    }
+    # 过渡兼容：旧磁带用的是绝对路径配方；本机可重算的遗留哈希一并接受
+    legacy_dataset_params = {
+        **dataset_params,
+        "dataset_dir": str(Path(dataset_dir).resolve()),
     }
 
     cells: list[tuple[Any, ToolsetConfig, Any, str]] = []  # (task, cfg, toolset, cfg_hash)
@@ -83,8 +90,14 @@ def run_experiment(
             {"instruction": instruction},
             dataset_params,
         )
+        legacy_hash = config_hash(
+            {"toolset": cfg.as_dict()},
+            {"model": model_config_dict},
+            {"instruction": instruction},
+            legacy_dataset_params,
+        )
         for task in tasks:
-            cells.append((task, cfg, toolset, cfg_hash))
+            cells.append((task, cfg, toolset, cfg_hash, legacy_hash))
 
     progress.begin(len(cells))
     summary = RunSummary()
@@ -92,10 +105,10 @@ def run_experiment(
     # 流式观察：显式开关 + 报告器订阅者同时满足才接 delta
     on_delta = getattr(progress, "delta", None) if stream else None
 
-    def run_cell(cell: tuple[Any, ToolsetConfig, Any, str]) -> None:
-        task, cfg, toolset, cfg_hash = cell
+    def run_cell(cell: tuple[Any, ToolsetConfig, Any, str, str]) -> None:
+        task, cfg, toolset, cfg_hash, legacy_hash = cell
         label = f"{task.task_id} × {cfg.name}"
-        old = store.resumable(task.task_id, cfg.name, cfg_hash)
+        old = store.resumable(task.task_id, cfg.name, cfg_hash, legacy=legacy_hash)
         if old is not None:
             summary[str((task.task_id, cfg.name))] = "resumed"
             progress.end_cell(label, old, 0.0)
