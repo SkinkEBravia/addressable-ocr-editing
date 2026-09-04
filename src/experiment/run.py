@@ -67,9 +67,9 @@ def run_experiment(
     instruction = instruction if instruction is not None else dataset.default_instruction()
 
     dataset_params = {
-        # 环境无关的相对形式：宿主与容器都从仓库根跑同一条命令时，
-        # resume 键必须一致（否则换环境 = 静默全量重跑，血泪教训）
-        "dataset_dir": str(Path(dataset_dir)),
+        # 环境无关的 POSIX 相对形式：宿主与容器都从仓库根跑同一条命令时，
+        # resume 键必须一致（Windows 下 str(Path) 会带反斜杠，必须用 as_posix）
+        "dataset_dir": Path(dataset_dir).as_posix(),
         "split": split,
         "loader_keys": loader_keys,
         "meta": meta_filter,
