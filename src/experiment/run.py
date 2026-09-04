@@ -37,7 +37,7 @@ def run_experiment(
     *,
     dataset_dir: Path,
     toolset_configs: list[ToolsetConfig],
-    client: LLMClient,
+    client: LLMClient | None,  # None 仅当全部工具集不调 LLM
     model_config_dict: dict,
     split: str,
     loader_keys: list[str] | None = None,

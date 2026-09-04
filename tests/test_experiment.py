@@ -165,3 +165,22 @@ def test_resumable_accepts_legacy_hash(tmp_path):
     assert store.resumable("t1", "noop", "legacy-hash") is not None
     assert store.resumable("t1", "noop", "new-hash") is None
     assert store.resumable("t1", "noop", "new-hash", legacy="legacy-hash") is not None
+
+
+def test_cli_noop_needs_no_credentials(tmp_path):
+    """纯 noop 运行不需要任何凭证（不建 client、不发请求）。"""
+    cfg = tmp_path / "m.toml"
+    cfg.write_text(
+        'protocol = "openai-response"\nbase_url = "http://x"\n'
+        'model = "m"\nkey_env = "DEFINITELY_MISSING_KEY_XYZ"\n',
+        encoding="utf-8",
+    )
+    from experiment.__main__ import main
+
+    rc = main([
+        "--dataset", "datasets/tiny", "--toolsets", "noop",
+        "--model", str(cfg), "--split", "all",
+        "--out", str(tmp_path / "out"), "--reporter", "null",
+    ])
+    assert rc == 0
+    assert (tmp_path / "out" / "report.json").is_file()

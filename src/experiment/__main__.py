@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from agent import load_toolset_config
+from agent import build_toolset, load_toolset_config
 from llm import build_client, load_model_config
 
 from experiment.progress import build_reporter
@@ -132,7 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.instruction:
         instruction = Path(args.instruction).read_text(encoding="utf-8")
 
-    client = build_client(model_config)
+    client = None
+    if any(build_toolset(c).uses_llm for c in toolset_configs):
+        client = build_client(model_config)
+    # 全部工具集不调 LLM（如纯 noop 冒烟/续跑校验）时不需要凭证，不建 client
     prog = build_reporter(args.reporter)
     try:
         summary = run_experiment(
