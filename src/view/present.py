@@ -83,3 +83,28 @@ def present(
         },
         reference_map=reference_map,
     )
+
+
+def present_file(
+    snapshot: DocumentSnapshot,
+    filename: str,
+    prefix: str | None = None,
+    annotator: Annotator | None = None,
+) -> AgentView:
+    """带有文件标识抬头与前缀命名空间 ID 的专用 Presenter。
+
+    payload = f"--- [File: {filename}] ---\n" + 块标注
+    """
+    from view.defaults import blockkey_as_is, prefixed_blockkey, xml_ish
+
+    actual_annotator = annotator if annotator is not None else xml_ish
+    strategy = prefixed_blockkey(prefix) if prefix else blockkey_as_is
+    base_view = present(snapshot, strategy, actual_annotator)
+    header = f"--- [File: {filename}] ---\n"
+    return AgentView(
+        view_id=base_view.view_id,
+        snapshot_id=base_view.snapshot_id,
+        payload=header + base_view.payload,
+        render_spec={**base_view.render_spec, "filename": filename, "prefix": prefix},
+        reference_map=base_view.reference_map,
+    )

@@ -20,6 +20,8 @@ from view import (
     ReferenceMap,
     ViewError,
     blockkey_as_is,
+    file_header,
+    prefixed_blockkey,
     present,
     render_blocks,
     xml_ish,
@@ -156,3 +158,25 @@ class TestReferenceMap:
             ref["nope"]
         with pytest.raises(KeyError):
             ref.agent_id_of("nope")
+
+
+class TestPrefixedAndFileView:
+    def test_prefixed_blockkey_strategy(self) -> None:
+        block = Block(key="b1", content="hello", attrs={"start": 0})
+        strategy = prefixed_blockkey("c0")
+        assert strategy(block, 0) == "c0:b1"
+
+    def test_file_header_annotator(self) -> None:
+        annotator = file_header("chunk_0.txt", xml_ish)
+        out = annotator("c0:b1", "sample content")
+        assert out == '<x id="c0:b1"\\>\nsample content\n</x>\n'
+
+    def test_present_with_file_and_prefix(self) -> None:
+        snapshot = _snapshot("一二三四五六", size=3)
+        # present_file: 开头带文件提示，且各块带前缀
+        from view import present_file
+        view = present_file(snapshot, "chunk_0", "c0")
+        assert view.payload.startswith("--- [File: chunk_0] ---\n")
+        assert '<x id="c0:b1"\\>' in view.payload
+        assert view.reference_map["c0:b1"] == "b1"
+        assert view.reference_map.agent_id_of("b1") == "c0:b1"

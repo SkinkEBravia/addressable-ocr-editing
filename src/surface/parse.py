@@ -43,7 +43,7 @@ from surface.ops import (
 __all__ = ["parse"]
 
 _CALL_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*\Z", re.DOTALL)
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
 
 # 各操作的参数个数区间 (min, max)
 _ARITY: dict[str, tuple[int, int]] = {

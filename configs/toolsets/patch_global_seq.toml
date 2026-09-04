@@ -1,0 +1,7 @@
+# patch_global_seq：逐单元流式输入 + 全局回溯 patch（2.b：前缀块 ID 如 c0:b1，跨 chunk 路由修复）。
+toolset = "patch_global_seq"
+max_turns = 64
+apply_mode = "best_effort"
+hide_ops = ["append", "merge"]
+partition = "lines"
+block_size = 400

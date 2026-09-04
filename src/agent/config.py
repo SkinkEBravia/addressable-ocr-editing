@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.patch import PatchToolSet
-from agent.sequential import PatchSeqToolSet, RewriteSeqToolSet
+from agent.sequential import (
+    FindReplaceGlobalSeqToolSet,
+    FindReplaceSeqToolSet,
+    PatchGlobalSeqToolSet,
+    PatchSeqToolSet,
+    RewriteSeqToolSet,
+    SweEditGlobalSeqToolSet,
+    SweEditSeqToolSet,
+)
 from agent.standard import FindReplaceToolSet, NoopToolSet, RewriteToolSet
 from agent.swe_bash import SweBashToolSet
 from agent.swe_edit import SweEditToolSet
@@ -36,6 +44,11 @@ REGISTRY = {
     "patch_seq": PatchSeqToolSet,
     "swe_edit": SweEditToolSet,
     "swe_bash": SweBashToolSet,
+    "swe_edit_seq": SweEditSeqToolSet,
+    "find_replace_seq": FindReplaceSeqToolSet,
+    "patch_global_seq": PatchGlobalSeqToolSet,
+    "swe_edit_global_seq": SweEditGlobalSeqToolSet,
+    "find_replace_global_seq": FindReplaceGlobalSeqToolSet,
 }
 """包内标准工具集名 -> 类。"""
 

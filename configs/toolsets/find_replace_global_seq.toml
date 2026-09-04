@@ -1,0 +1,3 @@
+# find_replace_global_seq：逐单元流式输入 + 全局回溯字符串替换（2.b：替换作用于所有已呈现 chunk）。
+toolset = "find_replace_global_seq"
+max_turns = 64

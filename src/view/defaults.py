@@ -18,6 +18,14 @@ def blockkey_as_is(block: Block, index: int) -> AgentBlockId:
     return block.key
 
 
+def prefixed_blockkey(prefix: str) -> AgentIdStrategy:
+    """前缀命名空间 id 策略：AgentBlockId = ``{prefix}:{BlockKey}``。"""
+    def strategy(block: Block, index: int) -> AgentBlockId:
+        return f"{prefix}:{block.key}"
+    strategy.__name__ = f"prefixed_blockkey({prefix})"
+    return strategy
+
+
 def xml_ish(agent_id: AgentBlockId, content: str) -> str:
     """默认标注形式 ``xml-ish``（故意非良构，见 07-agent-api.md）::
 
@@ -31,6 +39,11 @@ def xml_ish(agent_id: AgentBlockId, content: str) -> str:
     因此全量 payload 直接按序拼接各块标注即得。
     """
     return f'<x id="{agent_id}"\\>\n{content}\n</x>\n'
+
+
+def file_header(filename: str, annotator: Annotator | None = None) -> Annotator:
+    """标注包装：保留基础 annotator 逐块行为。"""
+    return annotator if annotator is not None else xml_ish
 
 
 def line_number(block: Block, index: int) -> AgentBlockId:

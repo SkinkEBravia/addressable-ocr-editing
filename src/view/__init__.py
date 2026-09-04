@@ -4,8 +4,15 @@
 默认组件（blockkey-as-is / xml-ish）见 Docs/Design/07-agent-api.md。
 """
 
-from view.defaults import blockkey_as_is, cat_n, line_number, xml_ish
-from view.present import present, render_blocks
+from view.defaults import (
+    blockkey_as_is,
+    cat_n,
+    file_header,
+    line_number,
+    prefixed_blockkey,
+    xml_ish,
+)
+from view.present import present, present_file, render_blocks
 from view.types import (
     AgentBlockId,
     AgentIdStrategy,
@@ -27,8 +34,11 @@ __all__ = [
     "AgentView",
     "ReferenceMap",
     "present",
+    "present_file",
     "render_blocks",
     "blockkey_as_is",
+    "prefixed_blockkey",
+    "file_header",
     "xml_ish",
     "line_number",
     "cat_n",
