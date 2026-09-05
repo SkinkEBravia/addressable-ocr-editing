@@ -18,7 +18,7 @@
 |---|---|---|
 | noop | 锚点 | 不调 LLM，no-correction 基线 |
 | rewrite | 单轮长文重写 | 全文一次性重写；JSON 条款 |
-| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；best_effort + 隐去 append/merge |
+| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；**apply_mode=atomic（默认）**，未隐去任何操作 —— 记录初版误写为 best_effort，见下方「配置更正」 |
 | swe_edit | 整篇行号编辑 | 单轮行号区间替换（edit start:end "text"） |
 | find_replace | 整篇字符串替换 | 单轮字面字符串匹配替换（find_replace "old" "new"） |
 
@@ -43,6 +43,73 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
     --split dev --loaders dta19-l2/de/doc \
     --out runs/dta19-l2-doc-1t --workers 11
 ```
+
+
+> [!danger] 配置更正（2026-09-06）
+> 本记录初版把 `patch-1turn` 写成 "best_effort + 隐去 append/merge"，**与实际运行的
+> `configs/toolsets/patch-1turn.toml` 不符** —— 该文件既未设 `apply_mode`（⇒ 默认 **atomic**），
+> 也未设 `hide_ops`。那段描述实际对应的是从未在本 run 使用的 `patch-1turn-lenient.toml`。
+>
+> **后果**：atomic 下批次内任一 `replace` 的 `old` 匹配不上（`PATTERN_NOT_FOUND`）即**整批回滚**。
+> 磁带实测每-op 失败率仅 0.24%~1.27%，却因连坐作废了 19.5%~83.7% 的已提交 op。
+> **本记录中 `patch-1turn` 的全部数字都受此影响。**
+
+### best_effort 重放结果（2026-09-06，零 API 成本）
+
+| patch-1turn 配置 | cmer ↓ [95% CI] | fixed ↑ | broken ↓ | halluc ↓ |
+|---|---|---|---|---|
+| `atomic`（原记录） | 0.0461 [0.0361, 0.0549] | 30.32% | 0.67% | 0.18% |
+| **`best_effort`（修正）** | **0.0291 [0.0216, 0.0382]** | **66.64%** | 1.04% | 0.36% |
+| 变化 | **−36.9%** | **2.20×** | 1.55× | 2.0× |
+
+修正后的 l2 全臂（noop 0.0580）：
+
+| arm | cmer | fixed | broken | halluc | 备注 |
+|---|---|---|---|---|---|
+| swe_edit | **0.0258** | 68.73% | 0.89% | 0.43% | |
+| find_replace | 0.0276 | 64.54% | 0.70% | 0.28% | |
+| **patch (best_effort)** | 0.0291 | 66.64% | 1.04% | 0.36% | |
+| rewrite | 0.0560 | 45.88% | 2.58% | 0.38% | **5/11 `failed:incomplete`** |
+| noop | 0.0580 | — | — | — | |
+
+配对检验（三个编辑臂，best_effort 版报告内）：
+
+| 对比 | Δcmer [95% CI] | 判定 |
+|---|---|---|
+| noop vs patch | +0.02886 [+0.01921, +0.03757] | **显著优于 noop** |
+| noop vs swe_edit | +0.03217 [+0.02106, +0.04073] | **显著优于 noop** |
+| noop vs find_replace | +0.03034 [+0.02062, +0.03945] | **显著优于 noop** |
+| patch vs swe_edit | +0.00331 [−0.00907, +0.01611] | CI 跨 0 |
+| patch vs find_replace | +0.00147 [−0.01289, +0.01473] | CI 跨 0 |
+| swe_edit vs find_replace | −0.00184 [−0.01607, +0.01266] | CI 跨 0 |
+
+⇒ **三个编辑臂在 l2 统计上完全不可分，且全部显著优于 noop。**
+
+### `rewrite` 在 l2 的失败模式：写不完，不是写不好
+
+| 状态 | 篇数 | cmer |
+|---|---|---|
+| `done` | 6 | 0.0187 / 0.0197 / 0.0229 / 0.0241 / 0.0262 / 0.2139 |
+| **`failed:incomplete`** | **5** | 回退原文（≈ noop） |
+
+**完成的 6 篇里有 5 篇落在 0.019~0.026，与最优臂持平。** 也就是说 rewrite 在 l2 的问题不是质量，
+是 **45% 的文档根本输出不完** —— l2 错误密度约 5.8%，模型既要复现全部 ~14.4k 字符又要密集修复，
+输出长度撞上预算。
+
+> **这是「输出遍历全文」这一聚焦机制的容量约束**，见 `plan/experiment-batch-2-anchors.md` §1.1。
+> 高噪 + 长文档下，全文重写不是变差，是**不可行**。
+
+> [!danger] replay 副作用：本 run 的 `-be` 报告中 `rewrite` 数字不可用
+> `--replay` 会重 fold **所有**臂（不只被 `--replay-with` 覆盖的那个）。对 5 个
+> `failed:incomplete` 的 rewrite 会话，原始 run 的 `session.output` 回退为原文（cmer ≈ noop），
+> 但 replay 重 fold 时 `extract` 在空 tool_state 上返回空串且**不抛异常** ⇒ 未走
+> `except: output = task.input` 的回退分支 ⇒ cmer 变成 **1.0000**，rewrite 聚合从 0.0560 被抬到 0.4841。
+>
+> **本节 rewrite 的数字取自原始报告 `runs/dta19-l2-doc-1t/report.json`；`-be` 报告仅 `patch-1turn` 可用。**
+> 其余三个已重放的 run（l0 chunk / l0 doc / l1 doc）经逐样本核对，非 patch 臂**零改动**，不受此影响。
+
+资产：`runs/dta19-l2-doc-1t-be/report.json`（replay `changed=10 lower_bound=0`）
+
 
 ## 结果
 

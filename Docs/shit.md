@@ -59,3 +59,24 @@
 
 - 本机 Temp 目录被锁：pytest 必须 `--basetemp=.pytest-tmp`，否则全挂。
 - 前台命令 300s 上限 + 思考模式单调用 150–400s：LLM 实验只能交回用户跑，我这边只能跑 fake 模型冒烟。定流程时先把"谁等得起"想清楚。
+- **`/mnt/d` 上的 checkout 不能混用 WSL 与 Windows 的 uv**。在 WSL 里跑一次 `uv run`，Linux 版 uv 会把 `.venv` 重建成 Linux 布局（含 `lib64 -> lib` 符号链接），之后宿主 uv 报 `failed to remove file .venv\lib64: 拒绝访问 (os error 5)`。修法：`rm -rf .venv` 让宿主重建。规矩：**同一个 checkout 只能有一个 uv 宿主**；WSL 侧要跑 Python 就用裸 `python3`，别碰 `uv`。顺带：`.pytest_cache` 未被 gitignore，跑完测试记得清。
+
+
+## 11. 实验记录里的配置描述与 toml 不符
+
+现象：四份 dta19 实验记录都写着 `patch-1turn` 用了 "best_effort + 隐去 append/merge"，实际 `configs/toolsets/patch-1turn.toml` 里**两样都没有**——既没设 `apply_mode`（⇒ 默认 `atomic`），也没设 `hide_ops`。那段描述对应的是从未在这些 run 里用过的 `patch-1turn-lenient.toml`。
+后果：`atomic` 下批次内任一 `replace` 的 `old` 匹配不上即**整批回滚**。每-op 失败率只有 0.24%~1.27%，却因连坐作废了 19.5%~83.7% 的已提交 op。l1 上 `patch` 的 cMER 被推高 46%（0.0112 → 0.0209），据此写出的"patch 在密集错误下改不动"的结论完全是假的。
+教训：这比坑 #8（文档落后代码）更糟——**文档主动断言了一件假事，于是没人再去核 toml**。规矩：实验记录的 Arms 表必须与实际 toml 逐字段对拍，最好由脚本从 `report.json` 落盘的配置自动生成，而不是手写。
+
+## 12. `--replay` 不重算报告
+
+现象：改 `apply_mode` 后跑 `--replay`，打印 `changed=7`，但 `report.json` 的 `aggregate` 与 `per_sample` **逐字节没变**。
+原因：`replay()` 只做两件事——更新磁带的 `session.output`，写 `report["replay"]` 段。**它从不重新评分**。重算在 `build_report`（从磁带 + scorer 重建），要单独跑 `--report-only`。
+教训：`--replay` 后必须接 `--report-only`，否则读到的是陈数字。**而且陈得毫无异常迹象**——如果不是去核 `per_sample`，就会读出"best_effort 和 atomic 完全相同"，然后得出与真相相反的结论。和坑 #1 同形：成功地没干活，只有交叉核对能暴露。建议：`changed > 0` 时让 `--replay` 直接重建报告，或至少打一行"报告未重算"的警告。
+
+## 13. `--replay` 会重 fold 全部臂，且毁掉失败会话
+
+现象：只用 `--replay-with patch-1turn=...` 覆盖 patch，结果 `dta19-l2-doc-1t` 的 **rewrite 臂**聚合 cMER 从 0.0560 被抬到 0.4841。
+原因：`replay()` 遍历 `report["toolsets"]` 里的**所有**臂重 fold，`--replay-with` 只决定用哪份配置。对 5 个 `failed:incomplete` 的 rewrite 会话，原始 run 的 `session.output` 按设计回退为原文（cMER ≈ noop）；replay 重 fold 时 `extract` 在空 tool_state 上返回**空串且不抛异常**，于是没走 `except: output = task.input` 的回退分支，cMER 变成 1.0000。
+教训：**replay 只对"确定性后处理"安全，对"失败会话的回退语义"不安全**——回退发生在 loop 层（`status=failed` ⇒ 产出原文），而 replay 只重放 fold，丢掉了这层语义。规矩：replay 后必须逐样本对拍未被覆盖的臂；`failed:*` 的会话应在 replay 中原样保留 `session.output`，不参与重 fold。
+（本次影响面：l0-chunk / l0-doc / l1-doc 三个 run 的非 patch 臂逐样本核对为零改动，只有 l2 的 rewrite 中招——因为只有它有"失败且无任何有效提交"的会话。）

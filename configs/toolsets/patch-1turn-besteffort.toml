@@ -1,0 +1,15 @@
+# patch-1turn 的 replay 专用变体：**只**把应用策略从 atomic 换成 best_effort。
+#
+# 背景：patch-1turn.toml 未设 apply_mode，默认 atomic —— 批次内任一 replace 的
+# old 串匹配不上（PATTERN_NOT_FOUND）即整批回滚。磁带实测：每-op 失败率仅
+# 0.24%~1.27%，却因连坐作废了 19.5%~83.7% 的已提交 op。
+#
+# 为何可以 replay（不必重打 API）：apply_mode 不是 patch_clause() 的入参，
+# 不进提示词 ⇒ 模型响应逐字不变，只有工具 fold 行为变。
+# 注意：不得改用 patch-1turn-lenient.toml —— 它同时设了 hide_ops，会改提示词，
+# 使 replay 失效。本文件与 patch-1turn.toml 的差异**仅有 apply_mode 一行**。
+toolset    = "patch"
+max_turns  = 1
+apply_mode = "best_effort"
+partition  = "lines"
+block_size = 400

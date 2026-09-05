@@ -15,7 +15,7 @@
 |---|---|---|
 | noop | 锚点 | 不调 LLM，no-correction 基线 |
 | rewrite | 单轮长文重写 | 全文一次性重写；JSON 条款 |
-| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；best_effort + 隐去 append/merge |
+| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；**apply_mode=atomic（默认）**，未隐去任何操作 —— 记录初版误写为 best_effort，见下方「配置更正」 |
 | swe_edit | 整篇行号编辑 | 单轮行号区间替换（edit start:end "text"） |
 | find_replace | 整篇字符串替换 | 单轮字面字符串匹配替换（find_replace "old" "new"） |
 
@@ -40,6 +40,16 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
     --split dev --loaders dta19-l0/de/doc \
     --out runs/dta19-doc-1t --workers 11
 ```
+
+
+> [!danger] 配置更正（2026-09-06）
+> 本记录初版把 `patch-1turn` 写成 "best_effort + 隐去 append/merge"，**与实际运行的
+> `configs/toolsets/patch-1turn.toml` 不符** —— 该文件既未设 `apply_mode`（⇒ 默认 **atomic**），
+> 也未设 `hide_ops`。那段描述实际对应的是从未在本 run 使用的 `patch-1turn-lenient.toml`。
+>
+> **后果**：atomic 下批次内任一 `replace` 的 `old` 匹配不上（`PATTERN_NOT_FOUND`）即**整批回滚**。
+> 磁带实测每-op 失败率仅 0.24%~1.27%，却因连坐作废了 19.5%~83.7% 的已提交 op。
+> **本记录中 `patch-1turn` 的全部数字都受此影响。**
 
 ## 结果
 
@@ -68,6 +78,40 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 | find_replace | 0.0052 | 0.0050 | 0.0216 | -0.4545 |
 | rewrite | 0.0087 | 0.0075 | 0.0266 | -0.4545 |
 | swe_edit | 0.0259 | 0.0289 | 0.0547 | -0.4545 |
+
+## 修正：atomic 连坐与 best_effort 重放（2026-09-06）
+
+`patch-1turn` 实际以 `apply_mode=atomic` 运行（见上方配置更正）。磁带实测本 run：
+提交 262 个 op，每-op 失败率 **0.76%**，但因 atomic 连坐作废了 **29.8%** 的已提交 op。
+失败全部是 `PATTERN_NOT_FOUND`，零条 `KEY_NOT_FOUND`。
+
+### best_effort 重放结果（零 API 成本）
+
+| patch-1turn 配置 | cmer ↓ [95% CI] | fixed ↑ | broken ↓ | halluc ↓ |
+|---|---|---|---|---|
+| `atomic`（原记录） | 0.0047 [0.0034, 0.0064] | 20.72% | 0.16% | 0.13% |
+| `best_effort`（修正） | **0.0051 [0.0036, 0.0069]** | 27.28% | 0.22% | 0.18% |
+
+> [!important] 与 l1 相反：l0 上 best_effort **反而更差**
+> 修复量上升（fixed 20.72% → 27.28%）带来的收益，抵不过破坏上升（broken 0.16% → 0.22%）的代价。
+> 在错误率仅 0.4% 的文本上，**"少做事"本身就是优势 —— 哪怕它是一个 bug 造成的**。
+>
+> 也就是说：**atomic 的连坐缺陷在 l0 上伪装成了良好的设计。**
+> 若不做跨噪声级比较（l1 上同一缺陷使 cMER 恶化 46%），这个 bug 可能永远不会暴露。
+
+### 修正后的 l0 配对检验（best_effort 版报告内）
+
+| 对比 noop | Δcmer [95% CI] | 判定 |
+|---|---|---|
+| rewrite | −0.00343 [−0.00704, −0.00062] | **显著差于 noop** |
+| swe_edit | −0.02487 [−0.07162, −0.00051] | **显著差于 noop** |
+| **patch (best_effort)** | −0.00101 [−0.00280, +0.00038] | **与 noop 打平** |
+| **find_replace** | −0.00099 [−0.00211, +0.00015] | **与 noop 打平** |
+| patch vs find_replace | +0.00003 [−0.00149, +0.00169] | 完全不可分 |
+
+⇒ 结论应从「低噪下所有 arm 都输给 noop」**精确为**：
+**在极低噪声下，只有局部内容锚编辑（patch / find_replace）能做到"不比不修更差"；
+全文重写与行号锚显著有害。**
 
 ## 读法与结论
 

@@ -15,7 +15,7 @@
 |---|---|---|
 | noop | 锚点 | 不调 LLM，no-correction 基线 |
 | rewrite | 单轮长文重写 | 全文一次性重写；JSON 条款 |
-| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；best_effort + 隐去 append/merge |
+| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；**apply_mode=atomic（默认）**，未隐去任何操作 —— 记录初版误写为 best_effort，见下方「配置更正」 |
 | swe_edit | 整篇行号编辑 | 单轮行号区间替换（edit start:end "text"） |
 | find_replace | 整篇字符串替换 | 单轮字面字符串匹配替换（find_replace "old" "new"） |
 
@@ -40,6 +40,16 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
     --split dev --loaders dta19-l1/de/doc \
     --out runs/dta19-l1-doc-1t --workers 11
 ```
+
+
+> [!danger] 配置更正（2026-09-06）
+> 本记录初版把 `patch-1turn` 写成 "best_effort + 隐去 append/merge"，**与实际运行的
+> `configs/toolsets/patch-1turn.toml` 不符** —— 该文件既未设 `apply_mode`（⇒ 默认 **atomic**），
+> 也未设 `hide_ops`。那段描述实际对应的是从未在本 run 使用的 `patch-1turn-lenient.toml`。
+>
+> **后果**：atomic 下批次内任一 `replace` 的 `old` 匹配不上（`PATTERN_NOT_FOUND`）即**整批回滚**。
+> 磁带实测每-op 失败率仅 0.24%~1.27%，却因连坐作废了 19.5%~83.7% 的已提交 op。
+> **本记录中 `patch-1turn` 的全部数字都受此影响。**
 
 ## 结果
 
@@ -67,6 +77,68 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 | swe_edit | 0.0152 | 0.0127 | 0.0724 | **+0.9091** |
 | find_replace | 0.0148 | 0.0127 | 0.0704 | +0.8182 |
 | patch-1turn | 0.0229 | 0.0209 | 0.1362 | +0.2727 |
+
+## 修正：atomic 连坐与 best_effort 重放（2026-09-06）
+
+`patch-1turn` 实际以 `apply_mode=atomic` 运行（见上方配置更正）。磁带实测：
+
+| | 提交 op | 每-op 失败率 | 因 atomic 作废的 op |
+|---|---|---|---|
+| `dta19-l1-doc-1t` | 3339 | **0.24%** | **83.7%** |
+
+典型：`第 229 条失败 / 共 774 条` ⇒ 773 条正确修复全部作废。
+失败**全部**是 `PATTERN_NOT_FOUND`（`old` 不匹配），**零条 `KEY_NOT_FOUND`、零条解析错误** ——
+块 id 从未写错，patch 的单条定位精度实为全场最好。
+
+### best_effort 重放结果（零 API 成本）
+
+`apply_mode` 不是 `patch_clause()` 的入参、不进提示词 ⇒ 模型响应逐字不变，仅工具 fold 改变，
+因此可用磁带重放（`configs/toolsets/patch-1turn-besteffort.toml`，与 `patch-1turn.toml` 仅
+`apply_mode` 一行之差）：
+
+```powershell
+uv run python -m experiment --out runs/dta19-l1-doc-1t-be --replay `
+    --replay-with patch-1turn=patch-1turn-besteffort
+uv run python -m experiment --out runs/dta19-l1-doc-1t-be --report-only   # replay 不重算分数，必须补这步
+```
+
+| patch-1turn 配置 | cmer ↓ [95% CI] | fixed ↑ | broken ↓ | halluc ↓ |
+|---|---|---|---|---|
+| `atomic`（原记录） | 0.0209 [0.0171, 0.0243] | 20.27% | **0.15%** | **0.08%** |
+| **`best_effort`（修正）** | **0.0112 [0.0093, 0.0139]** | **70.97%** | 0.41% | 0.24% |
+| 变化 | **−46.4%** | **3.50×** | 2.73× | 3.0× |
+
+修正后的全臂排序（cmer 均值）：
+
+| arm | cmer | fixed | broken | halluc |
+|---|---|---|---|---|
+| **patch-1turn (best_effort)** | **0.0112** | 70.97% | 0.41% | 0.24% |
+| rewrite | 0.0122 | 82.35% | 0.81% | 0.53% |
+| swe_edit | 0.0127 | 70.22% | 0.54% | 0.32% |
+| find_replace | 0.0127 | 64.23% | 0.38% | 0.24% |
+| noop | 0.0242 | — | — | — |
+
+**配对检验（best_effort 版报告内）**：
+
+| 对比 | Δcmer [95% CI] | 判定 |
+|---|---|---|
+| noop vs 四臂 | 均 +0.0116~+0.0130，CI 不含 0 | **四臂全部显著优于 noop** |
+| rewrite vs patch | +0.00097 [−0.00223, +0.00449] | CI 跨 0 |
+| patch vs swe_edit | −0.00146 [−0.00306, +0.00003] | CI 跨 0（几乎触界） |
+| patch vs find_replace | −0.00143 [−0.00460, +0.00140] | CI 跨 0 |
+
+> [!warning] 措辞纪律
+> 四臂**彼此全部 CI 跨 0**。只能说 **"patch 从显著垫底恢复到与其余三臂统计持平、均值最优"**，
+> **不能**说"翻到第一"。n=11 撑不起更强的断言。
+
+### 对原结论的影响
+
+原「读法与结论」第 3 条（`patch-1turn` 在密集错误下"倾向于改不动"、"局部局限性"）**作废** ——
+20.27% 的召回不是操作逻辑的性质，是 atomic 连坐把 83.7% 的正确 op 作废的结果。
+修正后 patch 的召回为 70.97%，与 swe_edit（70.22%）持平。
+
+真正成立的是：**patch 在同等召回下的 broken（0.41%）与 halluc（0.24%）均为四臂最低**，
+即"以更小的破坏拿到相当的召回"。
 
 ## 读法与结论
 
