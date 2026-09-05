@@ -97,7 +97,9 @@ class RichProgress:
             _environ=environ,  # rich 内部参数（rich 15 锁定），隔离 TERM 误判
         )
         self._tty = force_terminal
-        self._lock = threading.RLock()  # Live 渲染回调会重入（update 时持锁渲染）
+        # Live 刷新线程：持 Live lock → __rich__ 再拿本锁。worker 不得在持本锁时
+        # 等 Live（update/start/stop），否则 resume 风暴会死锁。
+        self._lock = threading.RLock()
         self._live: Any = None
         self._total = 0
         self._done = 0
@@ -114,6 +116,7 @@ class RichProgress:
     # -- 生命周期 -------------------------------------------------------------
 
     def begin(self, total: int) -> None:
+        start_live = False
         with self._lock:
             self._total = total
             self._done = 0
@@ -122,23 +125,27 @@ class RichProgress:
             self._cell_out.clear()
             self._delta_events.clear()
             self._last_delta = None
-            if self._tty and self._live is None:
-                from rich.live import Live
+            start_live = self._tty and self._live is None
+            renderable = self._renderable_locked() if start_live else None
+        if start_live:
+            from rich.live import Live
 
-                self._live = Live(
-                    self._renderable_locked(),
-                    console=self._console,
-                    refresh_per_second=5,
-                    transient=True,  # 结束后清掉刷新块，不留历史
-                )
-                self._live.start()
+            live = Live(
+                renderable,
+                console=self._console,
+                refresh_per_second=5,
+                transient=True,  # 结束后清掉刷新块，不留历史
+            )
+            live.start()
+            self._live = live
 
     def close(self) -> None:
         """停止 Live（实验结束时调用；幂等）。"""
         with self._lock:
-            if self._live is not None:
-                self._live.stop()
-                self._live = None
+            live = self._live
+            self._live = None
+        if live is not None:
+            live.stop()
 
     # -- 事件 ---------------------------------------------------------------
 
@@ -147,11 +154,12 @@ class RichProgress:
             self._label = label  # 最近启动的 cell（并发下仅作指示）
             self._active.add(label)
             self._cell_out.setdefault(label, 0)
-            if self._tty:
-                self._refresh_locked()
-            else:
+            tty = self._tty
+            if not tty:
                 self._stream.write(f"[start] {label}\n")
                 self._stream.flush()
+        if tty:
+            self._refresh()
 
     def delta(self, text: str) -> None:
         """流式观察：只计数（进全局时间窗，滚动 TPS 估值），不渲染模型输出文本。"""
@@ -166,8 +174,9 @@ class RichProgress:
             usage = session.usage
             if usage is not None:
                 self._cell_out[label] = usage.output_tokens  # 该 cell 累计值，覆盖不累加
-            if self._tty:
-                self._refresh_locked()
+            tty = self._tty
+        if tty:
+            self._refresh()
 
     def end_cell(self, label: str, session: Session, elapsed_s: float) -> None:
         with self._lock:
@@ -183,12 +192,14 @@ class RichProgress:
             )
             if session.failure is not None:
                 event += f" [{session.failure.kind}: {session.failure.message[:80]}]"
-            if self._tty:
+            tty = self._tty
+            if tty:
                 self._last_event = event  # 进刷新块，不另起历史行
-                self._refresh_locked()
             else:
                 self._stream.write(f"[{self._done}/{self._total}] {event}\n")
                 self._stream.flush()
+        if tty:
+            self._refresh()
 
     # -- 渲染 ---------------------------------------------------------------
 
@@ -237,9 +248,10 @@ class RichProgress:
 
         return _Dynamic()
 
-    def _refresh_locked(self) -> None:
-        if self._live is not None:
-            self._live.update(self._renderable_locked(), refresh=True)
+    def _refresh(self) -> None:
+        live = self._live
+        if live is not None:
+            live.update(self._renderable_locked(), refresh=True)
 
 
 def build_reporter(name: str | None) -> ProgressReporter:

@@ -2,6 +2,7 @@
 
 > 本文基于 `related_source/HIPE-OCRepair-2026-data-0.9.5/data/v0.9` 的实读统计（2026-09-02）。
 > 装载与评分入口见 `datasets/hipe_2026/dataset.py`；设计契约见 [Design/10-datasets.md](Design/10-datasets.md)。
+> 官方竞赛完整评测结果与各子集榜单见 [HIPE-official-leaderboard.md](HIPE-official-leaderboard.md)。
 
 ## 记录单位
 
