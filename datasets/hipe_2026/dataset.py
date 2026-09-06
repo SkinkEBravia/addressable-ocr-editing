@@ -224,9 +224,15 @@ def _cmer(reference: str, hypothesis: str) -> float:
 
 
 def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
-    """计算细粒度分解指标：fixed_rate, broken_rate, halluc_ins, missed_rate。
+    """计算细粒度分解指标。
 
     对应 Docs/HIPE-metrics-decomposition.md。
+
+    返回四个聚合率（fixed_rate / broken_rate / halluc_ins / missed_rate）
+    加九个 S/D/I 子分量计数与三个分母。子分量用于机制归因：
+    例如 rewrite 的破坏若以 ``broken_del`` 为主，说明是"漏抄"（复制失败）；
+    若以 ``broken_sub`` 为主，说明是"改错"（过度修正）。
+    计数在 doc 粒度会被 ``_Scorer.score`` 按 chunk 求均值（= 每 chunk 平均个数）。
     """
     from hipe_ocrepair_scorer.ocrepair_eval import norm
     from jiwer import process_characters
@@ -318,18 +324,67 @@ def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str,
         "broken_rate": broken_rate,
         "halluc_ins": halluc_ins,
         "missed_rate": missed_rate,
+        # --- S/D/I 子分量（计数）：机制归因用 ---
+        "fixed_sub": float(fixed_sub),
+        "fixed_del": float(fixed_del),
+        "fixed_ins_del": float(fixed_ins_del),
+        "broken_sub": float(broken_sub),
+        "broken_del": float(broken_del),
+        "broken_ins": float(broken_ins),
+        "missed_sub": float(missed_sub),
+        "missed_del": float(missed_del),
+        "missed_ins": float(missed_ins),
+        # --- 分母：供跨样本重新归一 ---
+        "n_errors_ocr": float(errors_i),
+        "n_correct_ocr": float(correct_i),
+        "n_gold_chars": float(n_g),
     }
 
 
+def _selection_stats(ocr: str, hypothesis: str) -> dict[str, float]:
+    """选择率：模型实际改动了多少「地方」与多少字符（由 input↔output 对齐得出）。
+
+    这是**唯一跨臂统一**的口径 —— ``rewrite`` 没有显式编辑操作，无法从磁带的
+    calls 计数，只能由产出与输入的差异反推。对有显式 op 的臂，本指标与其
+    op 数不必相等（一次 op 可覆盖多个对齐块，反之亦然），因此两者应分别报告。
+
+    - ``edit_spans``：连续的非 equal 对齐块个数 = 「改了多少地方」
+    - ``edited_chars``：这些块覆盖的字符数（取输入侧与输出侧跨度的较大者）
+    """
+    from hipe_ocrepair_scorer.ocrepair_eval import norm
+    from jiwer import process_characters
+
+    norm_i = norm(ocr)
+    norm_h = norm(hypothesis)
+    if norm_i == norm_h:
+        return {"edit_spans": 0.0, "edited_chars": 0.0}
+
+    align = process_characters(norm_i, norm_h)
+    spans = 0
+    chars = 0
+    if align.alignments:
+        for chunk in align.alignments[0]:
+            if chunk.type == "equal":
+                continue
+            spans += 1
+            chars += max(
+                chunk.ref_end_idx - chunk.ref_start_idx,
+                chunk.hyp_end_idx - chunk.hyp_start_idx,
+            )
+    return {"edit_spans": float(spans), "edited_chars": float(chars)}
+
+
 def _score_unit(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
-    """逐转写单元评分：cmer + cmer_hyp + 四维分解指标。"""
+    """逐转写单元评分：cmer + cmer_hyp + 分解指标（四率 + 九分量 + 三分母）+ 选择率。"""
     cmer = _cmer(reference, hypothesis)
     cmer_hyp = _cmer(reference, ocr)
     decomp = _decompose_alignment(reference, ocr, hypothesis)
+    selection = _selection_stats(ocr, hypothesis)
     return {
         "cmer": cmer,
         "cmer_hyp": cmer_hyp,
         **decomp,
+        **selection,
     }
 
 

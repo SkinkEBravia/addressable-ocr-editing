@@ -114,3 +114,65 @@ def test_scorer_integration_doc(hipe):
     assert "missed_rate" in res
     assert "halluc_ins" in res
     assert 0.0 < res["fixed_rate"] < 1.0  # 两个单元的均值
+
+
+# --- 批 0.5 新增：S/D/I 子分量与选择率 ---
+
+
+def test_decomposition_subcomponents_sum_to_rates(hipe):
+    """九个子分量必须与四个聚合率自洽（同一分母）。"""
+    res = hipe._decompose_alignment(
+        reference="hello world", ocr="helo wrld extra", hypothesis="hallo world"
+    )
+    n_err = res["n_errors_ocr"]
+    n_cor = res["n_correct_ocr"]
+    assert n_err > 0 and n_cor > 0
+
+    fixed = res["fixed_sub"] + res["fixed_del"] + res["fixed_ins_del"]
+    missed = res["missed_sub"] + res["missed_del"] + res["missed_ins"]
+    broken = res["broken_sub"] + res["broken_del"] + res["broken_ins"]
+
+    assert fixed / n_err == pytest.approx(res["fixed_rate"])
+    assert missed / n_err == pytest.approx(res["missed_rate"])
+    assert broken / n_cor == pytest.approx(res["broken_rate"])
+
+
+def test_decomposition_over_correction_is_substitution(hipe):
+    """把正确字符改错 => 破坏计入 broken_sub，而非 broken_del/broken_ins。"""
+    res = hipe._decompose_alignment(reference="hello", ocr="hello", hypothesis="hallo")
+    assert res["broken_sub"] > 0
+    assert res["broken_del"] == 0
+    assert res["broken_ins"] == 0
+
+
+def test_decomposition_dropped_text_is_deletion(hipe):
+    """漏抄（复制失败）=> 破坏计入 broken_del，而非 broken_sub。"""
+    res = hipe._decompose_alignment(
+        reference="hello world", ocr="hello world", hypothesis="hello"
+    )
+    assert res["broken_del"] > 0
+    assert res["broken_sub"] == 0
+
+
+def test_selection_stats_identity(hipe):
+    """输出与输入完全相同 => 零改动。"""
+    res = hipe._selection_stats("hello world", "hello world")
+    assert res["edit_spans"] == 0.0
+    assert res["edited_chars"] == 0.0
+
+
+def test_selection_stats_counts_regions(hipe):
+    """选择率数的是「改了多少地方」，不是改了多少字符。"""
+    one = hipe._selection_stats("helo world", "hello world")
+    assert one["edit_spans"] >= 1
+    assert one["edited_chars"] >= 1
+
+    two = hipe._selection_stats("aaa bbb ccc", "xxx bbb yyy")
+    assert two["edit_spans"] >= 2
+    assert two["edit_spans"] > one["edit_spans"]
+
+
+def test_selection_stats_is_arm_agnostic(hipe):
+    """rewrite 无显式 op，选择率仍可由 input↔output 对齐得出（这是其存在意义）。"""
+    rewritten = hipe._selection_stats("teh quick brovvn fox", "the quick brown fox")
+    assert rewritten["edit_spans"] >= 2
