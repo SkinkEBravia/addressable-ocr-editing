@@ -11,7 +11,9 @@
   磁带只存 calls/results，replay 重 fold 即重建。
 - 应用策略可替换：``apply_mode="atomic"``（默认，07 原语义）/
   ``"best_effort"``（逐条应用，失败 op 跳过并在 feedback 中回报）。
-- 提示词条款的操作清单可裁剪：``hidden_ops`` 隐去指定操作
+- 提示词条款的操作清单可裁剪：``hidden_ops`` **仅隐去条款文字，不拦截操作**；
+  需要真正受限的操作面时用 ``allowed_ops``（parse 层拒绝白名单外操作，
+  并自动隐去其条款，保证提示词与拦截同源）
   （OCR 修复里 append/merge 无意义——内容追加与插新块等效）。
 """
 
@@ -78,6 +80,17 @@ After your patch, the NEXT part is shown; you will NOT receive any patch feedbac
 
 _OP_ORDER = ("replace", "set_content", "set_attrs", "append", "remove", "move", "merge")
 
+_OP_NAME_BY_TYPE = {
+    surface.Replace: "replace",
+    surface.SetContent: "set_content",
+    surface.SetAttrs: "set_attrs",
+    surface.Append: "append",
+    surface.Remove: "remove",
+    surface.Move: "move",
+    surface.Merge: "merge",
+}
+"""SurfaceOp 类型到 fn 方言操作名的映射（显式枚举，不依赖类名推导）。"""
+
 
 def patch_clause(
     hidden_ops: frozenset[str] = frozenset(), *, sequential: bool = False
@@ -112,14 +125,24 @@ class PatchToolSet:
         *,
         apply_mode: str = surface.APPLY_ATOMIC,
         hidden_ops: frozenset[str] = frozenset(),
+        allowed_ops: frozenset[str] | None = None,
     ) -> None:
         if partition_kind not in ("lines", "chars"):
             raise ValueError(f"unknown partition: {partition_kind!r}")
         if apply_mode not in (surface.APPLY_ATOMIC, surface.APPLY_BEST_EFFORT):
             raise ValueError(f"unknown apply_mode: {apply_mode!r}")
+        if allowed_ops is not None:
+            unknown = set(allowed_ops) - set(_OP_ORDER)
+            if unknown:
+                raise ValueError(f"allowed_ops 含未知操作: {sorted(unknown)}")
+            if not allowed_ops:
+                raise ValueError("allowed_ops 不能为空集")
+            # 提示词与拦截同源：不在白名单内的操作一律不进条款
+            hidden_ops = frozenset(hidden_ops) | (set(_OP_ORDER) - set(allowed_ops))
         self._partition_kind = partition_kind
         self._block_size = block_size
         self._apply_mode = apply_mode
+        self._allowed_ops = frozenset(allowed_ops) if allowed_ops is not None else None
         self.prompt_clause = patch_clause(hidden_ops)
 
     # -- ToolSet 契约 -----------------------------------------------------
@@ -159,10 +182,39 @@ class PatchToolSet:
             stripped = "\n".join(lines).strip()
         calls: list[ToolCall] = []
         if stripped:
+            self._reject_disallowed(stripped)
             calls.append(ToolCall("run_patch", stripped))
         if trailing_done:
             calls.append(ToolCall("done"))
         return tuple(calls)
+
+    def _reject_disallowed(self, patch_text: str) -> None:
+        """白名单外的操作在 **parse 层**拒绝，错误经对话通道在下一轮回给模型。
+
+        为什么在 parse 而不是 degrade：
+        - 早失败，反馈更直接（``ToolParseError`` 的消息原样成为下一轮 user 消息）；
+        - 不触发 ``apply_mode="atomic"`` 的整批回滚（见 Docs/shit.md #11）。
+
+        语法错误不在此处报告 —— 交给 ``invoke`` 里既有的 ``surface.ParseError``
+        处理路径，保持行为不变。
+        """
+        if self._allowed_ops is None:
+            return
+        try:
+            ops = surface.parse(patch_text)
+        except surface.ParseError:
+            return  # 语法错误：沿用原路径，由 invoke 报告
+        seen = {
+            name for op in ops
+            if (name := _OP_NAME_BY_TYPE.get(type(op))) is not None
+        }
+        bad = sorted(seen - self._allowed_ops)
+        if bad:
+            allowed = ", ".join(sorted(self._allowed_ops))
+            raise ToolParseError(
+                f"operation(s) not available in this toolset: {', '.join(bad)}; "
+                f"only these are allowed: {allowed}"
+            )
 
     def invoke(self, call: ToolCall, tool_state: dict) -> ToolResult:
         if call.name == "done":

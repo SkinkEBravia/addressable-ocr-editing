@@ -35,21 +35,40 @@ __all__ = [
     "REGISTRY",
 ]
 
-REGISTRY = {
+REGISTRY: dict[str, type] = {
+    # ---- 当前命名：<寻址机制>[_<操作子集>][_<作用域>]，见 Docs/Design/09-tools.md ----
     "noop": NoopToolSet,
     "rewrite": RewriteToolSet,
     "patch": PatchToolSet,
+    "patch_replace": PatchToolSet,  # 仅 replace，parse 层强制（见 _ALLOWED_OPS）
     "find_replace": FindReplaceToolSet,
-    "rewrite_seq": RewriteSeqToolSet,
-    "patch_seq": PatchSeqToolSet,
     "swe_edit": SweEditToolSet,
-    "swe_bash": SweBashToolSet,
-    "swe_edit_seq": SweEditSeqToolSet,
-    "find_replace_seq": FindReplaceSeqToolSet,
+    "swe_bash": SweBashToolSet,  # harness，暂不参与实验
+    "rewrite_local_seq": RewriteSeqToolSet,
+    "patch_local_seq": PatchSeqToolSet,
+    "swe_edit_local_seq": SweEditSeqToolSet,
+    "find_replace_local_seq": FindReplaceSeqToolSet,
     "patch_global_seq": PatchGlobalSeqToolSet,
     "swe_edit_global_seq": SweEditGlobalSeqToolSet,
     "find_replace_global_seq": FindReplaceGlobalSeqToolSet,
+    # ---- 历史包袱：旧命名保留为别名，**勿用于新实验** ----
+    # 工具集名进入 resume 键、磁带路径与 report 的 arm 键，删除会使既有 run
+    # 无法 resume / replay / report-only。仅为读回历史 run 保留。
+    "rewrite_seq": RewriteSeqToolSet,
+    "patch_seq": PatchSeqToolSet,
+    "swe_edit_seq": SweEditSeqToolSet,
+    "find_replace_seq": FindReplaceSeqToolSet,
 }
+
+_LEGACY_TOOLSET_NAMES = frozenset({
+    "rewrite_seq", "patch_seq", "swe_edit_seq", "find_replace_seq",
+})
+"""旧命名。新实验请用 `*_local_seq`；见 README「工具集命名」。"""
+
+_ALLOWED_OPS: dict[str, frozenset[str]] = {
+    "patch_replace": frozenset({"replace"}),
+}
+"""注册表键 -> 真正被强制的操作白名单（parse 层拒绝白名单外操作）。"""
 """包内标准工具集名 -> 类。"""
 
 _KNOWN_KEYS = frozenset(
@@ -133,7 +152,15 @@ def load_toolset_config(name: str, base_dir: Path | None = None) -> ToolsetConfi
 def build_toolset(config: ToolsetConfig) -> ToolSet:
     """配置 -> 工具集装配。"""
     cls = REGISTRY[config.toolset]
-    if config.toolset in ("patch", "patch_seq"):
+    if config.toolset in ("patch", "patch_replace"):
+        return cls(
+            partition_kind=config.partition,
+            block_size=config.block_size,
+            apply_mode=config.apply_mode,
+            hidden_ops=frozenset(config.hide_ops),
+            allowed_ops=_ALLOWED_OPS.get(config.toolset),
+        )
+    if config.toolset in ("patch_local_seq", "patch_seq"):
         return cls(
             partition_kind=config.partition,
             block_size=config.block_size,

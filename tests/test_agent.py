@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from agent import (
@@ -404,3 +406,98 @@ def test_patch_trailing_done(tmp_path):
     assert session.status == "done"
     assert session.output == "hello world"
     assert len(session.turns) == 1
+
+
+# --- allowed_ops：parse 层强制的操作白名单 ---
+
+
+def test_patch_replace_rejects_disallowed_ops_at_parse():
+    """白名单外的操作在 parse 层被拒，错误经对话通道回给模型。"""
+    from agent.patch import PatchToolSet
+    from agent.toolset import ToolParseError
+
+    ts = PatchToolSet(allowed_ops=frozenset({"replace"}))
+    with pytest.raises(ToolParseError) as exc:
+        ts.parse('append(b1, "new block")')
+    assert "append" in str(exc.value)
+    assert "replace" in str(exc.value)
+
+
+def test_patch_replace_accepts_allowed_ops():
+    from agent.patch import PatchToolSet
+
+    ts = PatchToolSet(allowed_ops=frozenset({"replace"}))
+    calls = ts.parse('replace(b1, "teh", "the")')
+    assert [c.name for c in calls] == ["run_patch"]
+
+
+def test_patch_replace_hides_disallowed_ops_from_prompt():
+    """提示词与拦截同源：不在白名单内的操作不出现在条款里。"""
+    from agent.patch import PatchToolSet
+
+    ts = PatchToolSet(allowed_ops=frozenset({"replace"}))
+    assert "replace(id," in ts.prompt_clause
+    for op in ("append(", "merge(", "move(", "remove(", "set_attrs("):
+        assert op not in ts.prompt_clause
+
+
+def test_bare_patch_allows_all_ops():
+    """无后缀 patch = 全部七个 SurfaceOp，不做任何拦截。"""
+    from agent.patch import PatchToolSet
+
+    ts = PatchToolSet()
+    for text in ('append(b1, "x")', "remove(b2)", "merge(b1, b2)", "move(b1, b2)"):
+        assert ts.parse(text)  # 不抛
+
+
+def test_patch_syntax_error_still_goes_through_invoke():
+    """语法错误不在 parse 层报告 —— 保持既有路径（由 invoke 的 ParseError 处理）。"""
+    from agent.patch import PatchToolSet
+
+    ts = PatchToolSet(allowed_ops=frozenset({"replace"}))
+    calls = ts.parse("this is not a valid fn call at all")
+    assert [c.name for c in calls] == ["run_patch"]
+
+
+def test_allowed_ops_validation():
+    from agent.patch import PatchToolSet
+
+    with pytest.raises(ValueError, match="未知操作"):
+        PatchToolSet(allowed_ops=frozenset({"nope"}))
+    with pytest.raises(ValueError, match="不能为空集"):
+        PatchToolSet(allowed_ops=frozenset())
+
+
+# --- 注册表命名与历史别名 ---
+
+
+def test_legacy_toolset_names_alias_current_ones():
+    """历史命名必须与对应的 *_local_seq 指向同一个类。"""
+    from agent.config import REGISTRY
+
+    for legacy, current in [
+        ("rewrite_seq", "rewrite_local_seq"),
+        ("patch_seq", "patch_local_seq"),
+        ("swe_edit_seq", "swe_edit_local_seq"),
+        ("find_replace_seq", "find_replace_local_seq"),
+    ]:
+        assert REGISTRY[legacy] is REGISTRY[current], f"{legacy} 与 {current} 不同源"
+
+
+def test_toolset_registry_matches_design_doc():
+    """09-tools.md 的标准工具配置表必须覆盖注册表的全部**当前**命名。
+
+    历史别名（_LEGACY_TOOLSET_NAMES）不要求出现在表中。
+    """
+    from pathlib import Path
+
+    from agent.config import _LEGACY_TOOLSET_NAMES, REGISTRY
+
+    doc = (Path(__file__).resolve().parents[1] / "Docs/Design/09-tools.md").read_text(
+        encoding="utf-8"
+    )
+    missing = [
+        name for name in REGISTRY
+        if name not in _LEGACY_TOOLSET_NAMES and f"`{name}`" not in doc
+    ]
+    assert not missing, f"09-tools.md 未记录: {missing}"

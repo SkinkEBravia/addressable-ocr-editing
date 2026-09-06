@@ -71,6 +71,31 @@ report 的 `failure` 段（`rejected` / `incomplete` / `timeout` …，含 http_
 `swe_bash`（SWE 环境忠实复刻：bash + PATH 上的 edit 脚本，本机 Git Bash 后端）、
 `rewrite_seq` / `patch_seq`（逐 chunk 顺序修复，一文档一场对话，无反馈口径）。
 
+## 工具集命名
+
+```text
+<寻址机制>[_<操作子集>][_<作用域>]
+```
+
+| 段 | 取值 | 省略时 |
+|---|---|---|
+| 寻址机制 | `rewrite` / `patch` / `swe_edit` / `find_replace` | — |
+| 操作子集 | 如 `replace` | **全集** |
+| 作用域 | `local_seq`（每轮一个单元，只改当前）/ `global_seq`（可回溯改历史单元） | **单轮**（全部输入一次给出） |
+
+规矩：**凡是改变模型可见操作面的差异，必须体现在注册表键上**，不能只靠 toml
+文件名区分。只有当系统**真正拒绝**白名单外操作时才可加操作子集后缀 ——
+`hide_ops` 只裁剪提示词、不拦截操作，据它命名会让名字撒谎
+（见 [Docs/Design/09-tools.md](Docs/Design/09-tools.md)）。
+
+> [!WARNING]
+> **历史包袱**：`rewrite_seq` / `patch_seq` / `swe_edit_seq` / `find_replace_seq`
+> 是旧命名，等价于对应的 `*_local_seq`，**仅为读回既有 run 保留，勿用于新实验**。
+>
+> 不能直接删除：工具集名进入 **resume 键**、**磁带路径**
+> （`sessions/<task_id>/<toolset>.json`）与 **report 的 arm 键** —— 删掉会让
+> 既有 run 无法 `resume` / `--replay` / `--report-only`。
+
 ## 测试
 
 ```bash

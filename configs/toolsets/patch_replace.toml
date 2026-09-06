@@ -1,0 +1,14 @@
+# patch_replace：只暴露且**只接受** replace 的块补丁操作面。
+#
+# 与 `patch` 的差别是操作集，不是配置微调 —— 因此它是独立的注册表键，
+# 而不是 patch + hide_ops。理由见 Docs/Design/09-tools.md「命名规则」：
+#   hide_ops 只裁剪提示词、不拦截操作，据它命名会让名字撒谎。
+#   allowed_ops 在 parse 层拒绝白名单外操作，并自动隐去其条款（同源）。
+#
+# 被拒绝的操作经**对话通道**在下一轮回给模型（ToolParseError 的消息原样
+# 成为下一轮 user 消息），不触发 atomic 整批回滚。
+toolset    = "patch_replace"
+max_turns  = 1
+apply_mode = "best_effort"
+partition  = "lines"
+block_size = 400
