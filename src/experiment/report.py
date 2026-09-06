@@ -41,6 +41,27 @@ def resolve_dataset_dir(recorded: str) -> Path:
     return Path("datasets") / (name or p.name)
 
 
+def _order_stats(values: list[float]) -> dict[str, float]:
+    """次序统计量：median / p90 / max。
+
+    **为什么必须与 mean 并列报告**：本任务的破坏量是重尾的 —— 单个灾难性样本
+    足以支配均值。实测 `dta19-doc-1t` 的 `swe_edit`：破坏字符逐篇为
+    ``3203 106 90 67 52 46 30 21 12 10 6``，均值 331.2、**中位仅 46**；
+    cmer 均值 0.0289 vs 中位 0.0062（差 4.7 倍），bootstrap CI 宽达
+    [0.0048, 0.0751]。只看均值会把「1/11 的稀有灾难」误读成「普遍更差」。
+
+    与 `DELEGATE-52`（arXiv:2604.15597 §5）一致：稀疏的灾难性失败解释了
+    约 80% 的文档退化。详见 Docs/shit.md #14。
+    """
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    median = ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+    # 最近秩法：小样本下不插值，避免造出数据里不存在的值
+    p90 = ordered[min(n - 1, max(0, -(-n * 9 // 10) - 1))]
+    return {"median": median, "p90": p90, "max": ordered[-1]}
+
+
 def _usage_row(session) -> dict:
     usage = session.usage
     if usage is None:
@@ -117,7 +138,7 @@ def build_report(
             values = [r["score"][metric] for r in scored if metric in r["score"]]
             if values:
                 mean, lo, hi = bootstrap_ci(values)
-                agg[metric] = {"mean": mean, "lo": lo, "hi": hi}
+                agg[metric] = {"mean": mean, "lo": lo, "hi": hi, **_order_stats(values)}
         usages = [r["usage"] for r in rows.values() if not r["usage"].get("usage_missing")]
         if usages:
             total_in = sum(u["input_tokens"] for u in usages)

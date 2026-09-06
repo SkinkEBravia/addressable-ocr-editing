@@ -80,3 +80,11 @@
 原因：`replay()` 遍历 `report["toolsets"]` 里的**所有**臂重 fold，`--replay-with` 只决定用哪份配置。对 5 个 `failed:incomplete` 的 rewrite 会话，原始 run 的 `session.output` 按设计回退为原文（cMER ≈ noop）；replay 重 fold 时 `extract` 在空 tool_state 上返回**空串且不抛异常**，于是没走 `except: output = task.input` 的回退分支，cMER 变成 1.0000。
 教训：**replay 只对"确定性后处理"安全，对"失败会话的回退语义"不安全**——回退发生在 loop 层（`status=failed` ⇒ 产出原文），而 replay 只重放 fold，丢掉了这层语义。规矩：replay 后必须逐样本对拍未被覆盖的臂；`failed:*` 的会话应在 replay 中原样保留 `session.output`，不参与重 fold。
 （本次影响面：l0-chunk / l0-doc / l1-doc 三个 run 的非 patch 臂逐样本核对为零改动，只有 l2 的 rewrite 中招——因为只有它有"失败且无任何有效提交"的会话。）
+
+## 14. 均值在重尾下会撒谎
+
+现象：`dta19-doc-1t` 的 `swe_edit` cMER 均值 0.0289，是同 run 其余臂（0.0050~0.0075）的 4~6 倍，据此写下了"行号锚在散文上天然危险、粗粒度 + 不可检测 = 最危险组合"的结论。
+原因：逐篇破坏字符是 `3203 106 90 67 52 46 30 21 12 10 6` —— **中位数只有 46**，均值 331 完全由那一篇 3203 撑起。cmer 中位数 0.0062，与 `find_replace` 的 0.0045、`rewrite` 的 0.0058 **同量级**。bootstrap CI 宽达 [0.0048, 0.0751]，跨度是中位数的 12 倍，本身就是重尾的信号，当时没读出来。
+教训：**n=11 且分布重尾时，均值由单个样本决定。** 臂间比较必须同时报中位数与尾部（P90 / max）；CI 宽度远大于中心值时先查逐样本，不要直接下结论。
+修正后的结论其实更强：**操作面决定的不是平均破坏，是破坏的尾部** —— `PATTERN_NOT_FOUND` / `KEY_NOT_FOUND` 给破坏设了上界（最大 231），行号锚没有上界（3203）。这与 DELEGATE-52（arXiv:2604.15597 §5）"稀疏的灾难性失败解释约 80% 的退化"同构。
+（已在 `report.py` 的聚合里加 `median` / `p90` / `max`，与 `mean` 并列。）

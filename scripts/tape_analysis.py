@@ -119,11 +119,12 @@ def report_run(run: Path) -> None:
     print(f"{run.name}")
     print("=" * 100)
 
-    print(f"\n{'arm':<24}{'批次':>6}{'整批失败':>10}{'提交op':>9}"
+    print(f"\n{'arm':<24}{'结果数':>7}{'失败数':>8}{'提交op':>9}"
           f"{'每-op失败率':>13}{'broken均':>10}{'cmer均':>9}  状态")
     for arm, group in sorted(grouped.items()):
         submitted = sum(r["edits"] for r in group)
-        batches = sum(r["ok"] + r["fail"] for r in group)
+        # 注意：这是**工具结果**总数（含 view/done），不是编辑批次数
+        results = sum(r["ok"] + r["fail"] for r in group)
         failed = sum(r["fail"] for r in group)
         per_op = failed / submitted if submitted else 0.0
         broken = [v for r in group
@@ -134,7 +135,7 @@ def report_run(run: Path) -> None:
         for r in group:
             statuses[r["status"]] += 1
         status_str = ", ".join(f"{k}:{v}" for k, v in sorted(statuses.items()))
-        print(f"{arm:<24}{batches:>6}{failed:>10}{submitted:>9}{per_op:>12.2%}"
+        print(f"{arm:<24}{results:>7}{failed:>8}{submitted:>9}{per_op:>12.2%}"
               f"{(sum(broken)/len(broken) if broken else 0):>10.4f}"
               f"{(sum(cmer)/len(cmer) if cmer else 0):>9.4f}  {status_str}")
 
