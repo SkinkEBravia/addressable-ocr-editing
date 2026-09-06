@@ -214,13 +214,27 @@ def _record(task: Task, output: str) -> dict:
     }
 
 
+def _mer_of(align) -> float:
+    """官方 MER 公式作用于一个已算好的 jiwer 对齐结果。
+
+    与 ``_cmer`` 的唯一差别是**不重新对齐** —— 供 ``_score_unit`` 复用同一份对齐。
+    """
+    from hipe_ocrepair_scorer.ocrepair_eval import mer_from_counts
+
+    return mer_from_counts(
+        align.hits, align.substitutions, align.deletions, align.insertions
+    )
+
+
 def _cmer(reference: str, hypothesis: str) -> float:
-    """逐条 cMER：官方归一化 + jiwer 字符对齐 + 官方 MER 公式。"""
-    from hipe_ocrepair_scorer.ocrepair_eval import mer_from_counts, norm
+    """逐条 cMER：官方归一化 + jiwer 字符对齐 + 官方 MER 公式。
+
+    独立入口（测试与外部调用）。评分热路径请走 ``_score_unit``，它共享对齐。
+    """
+    from hipe_ocrepair_scorer.ocrepair_eval import norm
     from jiwer import process_characters
 
-    out = process_characters(norm(reference), norm(hypothesis))
-    return mer_from_counts(out.hits, out.substitutions, out.deletions, out.insertions)
+    return _mer_of(process_characters(norm(reference), norm(hypothesis)))
 
 
 def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
@@ -238,13 +252,13 @@ def _decompose_alignment(reference: str, ocr: str, hypothesis: str) -> dict[str,
     from jiwer import process_characters
 
     norm_g = norm(reference)
-    norm_i = norm(ocr)
-    norm_h = norm(hypothesis)
-    n_g = len(norm_g)
+    align_i = process_characters(norm_g, norm(ocr))
+    align_h = process_characters(norm_g, norm(hypothesis))
+    return _decompose_from(len(norm_g), align_i, align_h)
 
-    align_i = process_characters(norm_g, norm_i)
-    align_h = process_characters(norm_g, norm_h)
 
+def _decompose_from(n_g: int, align_i, align_h) -> dict[str, float]:
+    """分解指标的内核：接收**已算好**的 (G,I) 与 (G,H) 对齐，不重新对齐。"""
     status_i = [None] * n_g
     status_h = [None] * n_g
     ins_i = [0] * (n_g + 1)
@@ -358,8 +372,11 @@ def _selection_stats(ocr: str, hypothesis: str) -> dict[str, float]:
     norm_h = norm(hypothesis)
     if norm_i == norm_h:
         return {"edit_spans": 0.0, "edited_chars": 0.0}
+    return _selection_from(process_characters(norm_i, norm_h))
 
-    align = process_characters(norm_i, norm_h)
+
+def _selection_from(align) -> dict[str, float]:
+    """选择率的内核：接收**已算好**的 (I,H) 对齐，不重新对齐。"""
     spans = 0
     chars = 0
     if align.alignments:
@@ -375,15 +392,42 @@ def _selection_stats(ocr: str, hypothesis: str) -> dict[str, float]:
 
 
 def _score_unit(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
-    """逐转写单元评分：cmer + cmer_hyp + 分解指标（四率 + 九分量 + 三分母）+ 选择率。"""
-    cmer = _cmer(reference, hypothesis)
-    cmer_hyp = _cmer(reference, ocr)
-    decomp = _decompose_alignment(reference, ocr, hypothesis)
-    selection = _selection_stats(ocr, hypothesis)
+    """逐转写单元评分：cmer + cmer_hyp + 分解指标（四率 + 九分量 + 三分母）+ 选择率。
+
+    三对对齐各算一次并共享，不重复：
+
+    ==========  ====================  ========================================
+    对齐对       用途                  为什么必须是这一对
+    ==========  ====================  ========================================
+    (G, H)      cmer、分解            产出相对 gold 的错误
+    (G, I)      cmer_hyp、分解        原文相对 gold 的错误
+    (I, H)      **选择率**            模型到底改了什么
+    ==========  ====================  ========================================
+
+    (I, H) **不能**由前两者推出：分解的 ``missed`` 分支（I 与 H 相对 G 都错）
+    无法区分 H 是否等于 I，会漏掉「把一个错改成另一个错」——而那正是过度修正
+    模型的典型行为。且选择率**不依赖 gold**，因此可用于 masked / 无标注数据；
+    从 G 锚定的对齐推导会丧失这个性质。
+    """
+    from hipe_ocrepair_scorer.ocrepair_eval import norm
+    from jiwer import process_characters
+
+    norm_g = norm(reference)
+    norm_i = norm(ocr)
+    norm_h = norm(hypothesis)
+
+    align_gh = process_characters(norm_g, norm_h)
+    align_gi = process_characters(norm_g, norm_i)
+
+    if norm_i == norm_h:
+        selection = {"edit_spans": 0.0, "edited_chars": 0.0}
+    else:
+        selection = _selection_from(process_characters(norm_i, norm_h))
+
     return {
-        "cmer": cmer,
-        "cmer_hyp": cmer_hyp,
-        **decomp,
+        "cmer": _mer_of(align_gh),
+        "cmer_hyp": _mer_of(align_gi),
+        **_decompose_from(len(norm_g), align_gi, align_gh),
         **selection,
     }
 
