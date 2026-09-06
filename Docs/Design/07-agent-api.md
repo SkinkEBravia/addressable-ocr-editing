@@ -112,10 +112,14 @@ OpError(index, op, reason)                     # IR 层：批次内哪条 core o
 
 | 组件 | 默认实现 | 定义位置 |
 |---|---|---|
-| partition | `partition_chars` | [02](02-partition.md#参考实现按字数切分) |
+| partition | `partition_lines`（每行一块） | [02](02-partition.md) |
 | id 策略 | `blockkey-as-is`：`AgentBlockId = BlockKey` | 本节 |
 | 标注形式 | `xml-ish`（下文） | 本节 |
 | patch 方言 | `fn`（下文） | 本节 |
+
+> [!note] 默认 partition 为 `lines`
+> `config.py` 的默认值与全部 `configs/toolsets/*.toml` 均为 `partition = "lines"`。
+> `partition_chars`（按字数切分，`block_size` 生效）仍可选，但不是默认。
 
 ### 标注形式 `xml-ish`
 

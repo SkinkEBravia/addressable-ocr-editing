@@ -179,11 +179,61 @@ extract: (tool_state, session) -> SourceText   # SourceText 见 01（text + enco
 | `patch` | `view` / `run_patch`（经 [07](07-agent-api.md) 公开接口，fn 方言） | 本系统 |
 | `find_replace` | `read` / `find_replace(old, new)` | 常见 harness 最小编辑工具的复刻（字符串锚，Aider / Claude Code Edit 流派） |
 | `swe_edit` | `view` / `edit(start, end, "text")` | 经典 SWE-agent v0.7 行号锚编辑的复刻（参照 related_agents/swe-agent-classic，MIT） |
-| `swe_bash` | `bash("cmd")` | SWE-agent 环境忠实复刻：模型只有一个 bash 入口，edit 是 PATH 上的脚本；ShellBackend 可替换（本机 GitBashBackend，无沙箱可信输入专用；DockerBackend 待有 Docker 的环境） |
+| `swe_bash`〔harness，暂不参与实验〕 | `bash("cmd")` | SWE-agent 环境忠实复刻：模型只有一个 bash 入口，edit 是 PATH 上的脚本；ShellBackend 可替换（本机 GitBashBackend，无沙箱可信输入专用；DockerBackend 待有 Docker 的环境） |
 | `rewrite_seq` | `submit`（隐式） | 逐单元顺序重写：一文档一场对话，每轮呈现一个单元，每单元一次机会，**无反馈口径**（工具结果/错误不回灌，对齐 rewrite）；末单元 `finish=True` 收束 |
 | `patch_seq` | `run_patch`（隐式） | 逐单元顺序 patch：同上口径；每单元独立 IR 会话（块 id 每单元重排）；建议配 `apply_mode = "best_effort"`（单机会下原子批过脆） |
+| `swe_edit_seq` | `edit`（局部作用域） | 逐单元顺序行号编辑：行号每单元从 1 重排，只能编辑当前单元 |
+| `find_replace_seq` | `find_replace`（局部作用域） | 逐单元顺序字符串替换：替换只在当前单元生效 |
+| `patch_global_seq` | `run_patch`（**全局作用域**） | 前缀命名空间块 id（`c0:b1`、`c1:b2`），可跨单元路由，**允许回溯编辑此前呈现过的任何单元** |
+| `swe_edit_global_seq` | `edit`（**全局作用域**） | 显式文件寻址（`edit chunk_0 1:2`），行号作用域被文件名隔离 |
+| `find_replace_global_seq` | `find_replace`（**全局作用域**） | 替换作用于当前及历史全部已呈现单元 |
+
+### 作用域：单轮 / 局部顺序 / 全局顺序
+
+工具集不是扁平列表，而是 **寻址机制 × 作用域** 的二维：
+
+| 作用域 | 一次对话看到什么 | 能改什么 | 命名 |
+|---|---|---|---|
+| **单轮** | 全部输入一次给出 | 全部 | 无后缀（`patch` / `swe_edit` / …） |
+| **局部顺序** | 每轮一个单元 | **仅当前单元**；id / 行号每单元重排 | `_seq` |
+| **全局顺序** | 每轮一个单元，带文件标识抬头 | **当前 + 全部历史单元**；靠前缀命名空间寻址（见 [06](06-view.md) 的 `present_file` / `prefixed_blockkey`） | `_global_seq` |
+
+`rewrite` 系没有全局作用域 —— 它不具备寻址能力，无法指向此前的单元。
+
+### `patch` 暴露的操作集
+
+**无后缀的 `patch` 暴露 `fn` 方言的全部七个 SurfaceOp**（见 [07](07-agent-api.md#surfaceop-标准集)）：
+
+`replace` / `set_content` / `set_attrs` / `append` / `remove` / `move` / `merge`
+
+> [!danger] `hide_ops` 只裁剪提示词，**不拦截操作**
+> `hide_ops` 作用于 `patch_clause()` 生成的操作清单 —— 被隐去的操作**不再出现在提示词里**，
+> 但 `surface.run_patch` 对它一无所知：模型若仍吐出该操作，**照样解析、照样应用**。
+>
+> ⇒ `hide_ops` 是**给模型的建议**，不是系统施加的约束。
+> ⇒ 因此**工具集名不得据 `hide_ops` 声称受限的操作集** —— 那会让名字撒谎。
+> 若要一个真正受限的操作面，必须在 `parse` / `degrade` 层拒绝清单外的操作，并作为**独立的注册表键**存在。
+
+### 命名规则
+
+```text
+<寻址机制>[_<操作子集>][_<作用域>]
+```
+
+- **寻址机制**：`rewrite` / `patch` / `swe_edit` / `find_replace`
+- **操作子集**：省略 = **全集**。仅当系统**真正拒绝**清单外操作时才可加后缀（见上方警告）
+- **作用域**：省略 = 单轮；`_seq` = 局部顺序；`_global_seq` = 全局顺序
+
+同一注册表键在不同 `toml` 下的行为差异（`apply_mode` / `partition` / 预算）由**报告标签**（toml 文件名）承载，
+但**凡是改变模型可见操作面的差异，必须体现在注册表键上**，不能只靠 toml 文件名区分。
 
 顺序工具集（`*_seq`）的 `parse` 永不抛错（任何响应都视为该单元的提交）；`max_turns` 只是安全上限，实际轮数 = 单元数。patch 系工具配置支持 `apply_mode`（atomic | best_effort，见 [07](07-agent-api.md#应用策略可替换件)）与 `hide_ops`（提示词操作清单裁剪）。
+
+> [!important] seq 变体与其单轮对应臂**共享提示词**（有意的口径绑定）
+> `sequential.py` 复用 `agent.patch.patch_clause` 与 `agent.standard.REWRITE_CLAUSE` /
+> `extract_rewrite_text`，以保证「同一寻址机制在不同作用域下条款一致」。
+> ⇒ **改动单轮臂的 `prompt_clause` 会静默改变对应 seq 臂的实验口径**，破坏跨批次可比性。
+> 调整任一方前，先确认另一方是否需要同步冻结。
 
 多对话变体（如逐单元重写后拼接的 rewrite_pieces）由**组装层**产生多个 Session 实现，不走 loop 变体；本版暂不提供，需要时按组装接口加。
 
