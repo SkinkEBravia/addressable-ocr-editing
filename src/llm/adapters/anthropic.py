@@ -22,6 +22,8 @@ from collections.abc import Callable
 import httpx
 
 from llm.adapters._transport import (
+    STREAM_STALL_SECONDS,
+    DeltaStallWatchdog,
     call_with_retries,
     iter_sse_data_lines,
     raise_for_status,
@@ -212,11 +214,14 @@ class AnthropicClient:
         text_parts: list[str] = []
         usage_acc: dict = {}
         n_data_events = 0
+        stall = DeltaStallWatchdog(STREAM_STALL_SECONDS)
         with client.stream(
             "POST", url, json=payload, headers=self._headers()
         ) as response:
             raise_for_status(response, attempts=attempts)
-            for data in iter_sse_data_lines(response):
+            for data in iter_sse_data_lines(
+                response, stall_timeout=STREAM_STALL_SECONDS
+            ):
                 n_data_events += 1
                 try:
                     obj = json.loads(data)
@@ -230,14 +235,23 @@ class AnthropicClient:
                     piece = delta.get("text")
                     thinking = delta.get("thinking")
                     if isinstance(piece, str) and piece:
+                        stall.feed()
                         text_parts.append(piece)
                         on_delta(piece)
                     elif isinstance(thinking, str) and thinking:
+                        stall.feed()
                         on_delta(thinking)  # 思考增量同样可观测
+                    else:
+                        stall.check(context=f"last_event={event}")
                 elif event == "message_start":
+                    stall.check(context=f"last_event={event}")
                     usage_acc.update((obj.get("message") or {}).get("usage") or {})
                 elif event == "message_delta":
+                    stall.check(context=f"last_event={event}")
                     usage_acc.update(obj.get("usage") or {})
+                else:
+                    # ping 等非增量事件：过增量级看门狗
+                    stall.check(context=f"last_event={event}")
         if n_data_events == 0:
             raise LLMError(
                 Failure(

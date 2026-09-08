@@ -64,6 +64,8 @@ Annotator = (agent_id: AgentBlockId, content: str) -> str
 | 任意 | `blockkey_as_is`（AgentBlockId = BlockKey） | `xml_ish`（`<x id="bN"\>`） | patch 操作面（07 默认栈） |
 | `partition_lines`（每行一块） | `line_number`（AgentBlockId = 行号，1 起，位置性） | `cat_n`（`N: content`） | 行号锚操作面（swe_edit） |
 | 任意 | `prefixed_blockkey`（`AgentBlockId = <prefix>:<BlockKey>`，如 `c0:b1`） | `xml_ish` | **全局作用域**操作面（`*_global_seq`）：跨 chunk 寻址需要命名空间隔离 |
+| `partition_lines` | `numkey`（AgentBlockId = BlockKey 序号，`b12` → `12`；**稳定**，编辑后不重排） | `cat_n` | num-key 锚操作面（neo 实验2：`patch_find_replace` / `find_replace_numkey` 等） |
+| `partition_lines` | —（不寻址） | `plain`（恒等，无标注） | path 抬头 + 纯原文视图（neo 实验1：`*_anthropic_style`） |
 
 ## 接口
 
@@ -72,16 +74,20 @@ def present(snapshot: DocumentSnapshot, strategy: AgentIdStrategy, annotator: An
 
 def present_file(snapshot: DocumentSnapshot, filename: str,
                  prefix: str | None = None,
-                 annotator: Annotator | None = None) -> AgentView
+                 annotator: Annotator | None = None,
+                 strategy: AgentIdStrategy | None = None,
+                 label: str = "File") -> AgentView
 ```
 
 `present_file` 是 `present` 的**带命名空间变体**，服务于一次对话内呈现多个单元的场景：
 
-- payload 前置文件标识抬头 `--- [File: {filename}] ---`；
+- payload 前置文件标识抬头 `--- [{label}: {filename}] ---`；
 - 给定 `prefix` 时，`AgentBlockId` 走 `prefixed_blockkey`（`c0:b1`），使**不同单元的块 id 不相撞**；
 - 这是**全局作用域**（跨 chunk 回溯编辑）成立的前提：没有命名空间，`b1` 会同时指向多个单元的首块。
 
-`prefix = None` 时退化为 `present` 的行为加一个抬头。
+`prefix = None` 时退化为 `present` 的行为加一个抬头。显式给 `strategy` 时优先于
+`prefix`（如 num-key 视图：`strategy=numkey, annotator=cat_n`）；`label` 只改抬头用词
+（默认 `File`，非文件语义的处理对象用 `Text`）。
 
 Presenter 是统一输出接口的消费方，纯函数、无副作用、不改动快照。
 `payload` = 按序对每个块应用 `annotator(strategy(block, i), block.content)` 并拼接。

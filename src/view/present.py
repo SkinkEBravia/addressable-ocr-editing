@@ -20,7 +20,12 @@ from view.types import (
     ViewError,
 )
 
-__all__ = ["present", "render_blocks"]
+__all__ = ["present", "render_blocks", "present_file", "file_header"]
+
+
+def file_header(label: str, filename: str) -> str:
+    """路径抬头：``--- [{label}: {filename}] ---\\n``。单处定义，供工具集复用。"""
+    return f"--- [{label}: {filename}] ---\n"
 
 
 def _component_name(component: Callable[..., object]) -> str:
@@ -90,21 +95,33 @@ def present_file(
     filename: str,
     prefix: str | None = None,
     annotator: Annotator | None = None,
+    strategy: AgentIdStrategy | None = None,
+    label: str = "File",
 ) -> AgentView:
     """带有文件标识抬头与前缀命名空间 ID 的专用 Presenter。
 
-    payload = f"--- [File: {filename}] ---\n" + 块标注
+    payload = file_header(label, filename) + 块标注
+
+    - strategy 缺省时沿用原行为：给定 ``prefix`` 走 ``prefixed_blockkey``，
+      否则 ``blockkey_as_is``；显式给 ``strategy`` 时优先（``prefix`` 不再生效）。
+    - ``label`` 只改抬头用词（默认 ``File``），供非文件语义的处理对象使用。
     """
     from view.defaults import blockkey_as_is, prefixed_blockkey, xml_ish
 
     actual_annotator = annotator if annotator is not None else xml_ish
-    strategy = prefixed_blockkey(prefix) if prefix else blockkey_as_is
+    if strategy is None:
+        strategy = prefixed_blockkey(prefix) if prefix else blockkey_as_is
     base_view = present(snapshot, strategy, actual_annotator)
-    header = f"--- [File: {filename}] ---\n"
+    header = file_header(label, filename)
     return AgentView(
         view_id=base_view.view_id,
         snapshot_id=base_view.snapshot_id,
         payload=header + base_view.payload,
-        render_spec={**base_view.render_spec, "filename": filename, "prefix": prefix},
+        render_spec={
+            **base_view.render_spec,
+            "filename": filename,
+            "prefix": prefix,
+            "label": label,
+        },
         reference_map=base_view.reference_map,
     )

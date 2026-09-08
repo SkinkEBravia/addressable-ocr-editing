@@ -105,6 +105,8 @@ def run_experiment(
     store = SessionStore(out)
     # 流式观察：显式开关 + 报告器订阅者同时满足才接 delta
     on_delta = getattr(progress, "delta", None) if stream else None
+    # 阶段活动行：报告器实现了 activity 才喂（LLM 请求中 / 执行 i/N / 收尾）
+    on_activity = getattr(progress, "activity", None)
 
     def run_cell(cell: tuple[Any, ToolsetConfig, Any, str, str]) -> None:
         task, cfg, toolset, cfg_hash, legacy_hash = cell
@@ -143,6 +145,7 @@ def run_experiment(
             fallback_text=task.input,
             on_turn=on_turn,
             on_delta=on_delta,
+            on_activity=on_activity,
         )
         store.write(session)
         summary[str((task.task_id, cfg.name))] = session.status

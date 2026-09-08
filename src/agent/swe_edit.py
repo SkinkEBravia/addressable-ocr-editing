@@ -45,7 +45,10 @@ _KNOWN = ("view", "edit")
 
 
 class SweEditToolSet:
-    """view / edit(start, end, text) 两个工具；tool_state 持有 IR store。"""
+    """view / edit(start, end, text) 两个工具；tool_state 持有 IR store + 内存快照。
+
+    落盘节奏同 numkey 臂（见 09「工具契约」flush 条）：轮内编辑只推进
+    内存快照，轮末由 loop 调 flush 一次性落盘。"""
 
     name = "swe_edit"
     uses_llm = True
@@ -58,8 +61,13 @@ class SweEditToolSet:
     ) -> dict[str, Any]:
         store = ir.Store(workdir / "session")
         source = sourceio.SourceText(text=task_input, encoding="utf-8", bom=b"")
-        ir.save(store, ir.birth(source, partition.partition_lines(source)))
-        return {"store": store}
+        snapshot = ir.birth(source, partition.partition_lines(source))
+        ir.save(store, snapshot)  # 初始快照落盘（审计起点）
+        return {"store": store, "snapshot": snapshot}
+
+    def flush(self, tool_state: dict) -> None:
+        """轮末持久化钩子（loop 在每轮 on_turn 前调用）。"""
+        ir.save(tool_state["store"], tool_state["snapshot"])
 
     def present_input(self, task_input: str, tool_state: dict) -> str:
         return self._view(tool_state)
@@ -107,15 +115,12 @@ class SweEditToolSet:
         return ToolResult(False, f"unknown tool: {call.name}")
 
     def extract(self, tool_state: dict, session: Session) -> SourceText:
-        store: ir.Store = tool_state["store"]
-        snapshot = ir.load(store, ir.current(store))
-        return reconstruction.reconstruct(snapshot)
+        return reconstruction.reconstruct(tool_state["snapshot"])
 
     # -- 内部 -------------------------------------------------------------
 
     def _view(self, tool_state: dict) -> str:
-        store: ir.Store = tool_state["store"]
-        snapshot = ir.load(store, ir.current(store))
+        snapshot = tool_state["snapshot"]  # 内存快照（轮末 flush 才落盘）
         agent_view = view_mod.present(
             snapshot, view_mod.line_number, view_mod.cat_n
         )
@@ -126,8 +131,7 @@ class SweEditToolSet:
             start, end, text = _parse_edit_args(call.args_text)
         except ToolParseError as exc:
             return ToolResult(False, f"edit: {exc}")
-        store: ir.Store = tool_state["store"]
-        snapshot = ir.load(store, ir.current(store))
+        snapshot = tool_state["snapshot"]
         ref_map = view_mod.present(
             snapshot, view_mod.line_number, view_mod.cat_n
         ).reference_map
@@ -153,7 +157,7 @@ class SweEditToolSet:
             new_snapshot = ir.apply(snapshot, tuple(ops))
         except ir.OpError as exc:
             return ToolResult(False, f"edit failed: {exc}")
-        ir.save(store, new_snapshot)
+        tool_state["snapshot"] = new_snapshot  # 内存推进，轮末 flush 落盘
         # 回显被改区域（全局行号，上下文各 2 行）
         blocks = new_snapshot.blocks
         added = len(lines)

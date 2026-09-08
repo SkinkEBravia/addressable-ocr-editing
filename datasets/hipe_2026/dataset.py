@@ -391,8 +391,17 @@ def _selection_from(align) -> dict[str, float]:
     return {"edit_spans": float(spans), "edited_chars": float(chars)}
 
 
+_KEY_LEAK_RE = re.compile(r"\d+: ")
+"""key 泄漏探测：产出文本的行首出现 num-key 形态前缀（``12: ...``）。
+
+只是启发式指示器（历史报纸文本偶发合法 ``数字: `` 行首），因此**单列、
+不进 broken**——它量化的是指令遵循（key 不得进入产出），不是修复质量。
+作用于**未归一化**的产出文本（官方 norm 会抹掉这个信号）。
+"""
+
+
 def _score_unit(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
-    """逐转写单元评分：cmer + cmer_hyp + 分解指标（四率 + 九分量 + 三分母）+ 选择率。
+    """逐转写单元评分：cmer + cmer_hyp + key_leak + 分解指标（四率 + 九分量 + 三分母）+ 选择率。
 
     三对对齐各算一次并共享，不重复：
 
@@ -427,6 +436,9 @@ def _score_unit(reference: str, ocr: str, hypothesis: str) -> dict[str, float]:
     return {
         "cmer": _mer_of(align_gh),
         "cmer_hyp": _mer_of(align_gi),
+        "key_leak": float(
+            sum(1 for line in hypothesis.split("\n") if _KEY_LEAK_RE.match(line))
+        ),
         **_decompose_from(len(norm_g), align_gi, align_gh),
         **selection,
     }

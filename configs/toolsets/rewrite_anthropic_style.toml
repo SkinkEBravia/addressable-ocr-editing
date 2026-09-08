@@ -1,0 +1,2 @@
+toolset   = "rewrite_anthropic_style"
+max_turns = 1

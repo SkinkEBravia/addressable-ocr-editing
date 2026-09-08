@@ -8,10 +8,12 @@ from view.defaults import (
     blockkey_as_is,
     cat_n,
     line_number,
+    numkey,
+    plain,
     prefixed_blockkey,
     xml_ish,
 )
-from view.present import present, present_file, render_blocks
+from view.present import file_header, present, present_file, render_blocks
 from view.types import (
     AgentBlockId,
     AgentIdStrategy,
@@ -35,9 +37,12 @@ __all__ = [
     "present",
     "present_file",
     "render_blocks",
+    "file_header",
     "blockkey_as_is",
     "prefixed_blockkey",
     "xml_ish",
     "line_number",
     "cat_n",
+    "numkey",
+    "plain",
 ]

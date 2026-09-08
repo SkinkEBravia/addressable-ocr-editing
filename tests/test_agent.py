@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from pathlib import Path
@@ -262,6 +264,48 @@ def test_swe_edit_line_range_replace(tmp_path):
     assert any("2: bb" in m.content for m in first)
 
 
+def test_loop_logs_parsed_call_count(tmp_path, caplog):
+    """执行阶段可观测：解析出的调用数落 agent.loop 日志（排查「cell 不收尾」）。"""
+    from agent.swe_edit import SweEditToolSet
+
+    ts = SweEditToolSet()
+    client = StubClient(['edit(2, 2, "BB")\nedit(3, 3, "CC")', "done()"])
+    session, messages = start_session(
+        ts, label="swe_edit", task_id="t1", task_input="aa\nbb\ncc",
+        task_meta={}, instruction=INST, workdir=tmp_path / "work",
+        config_hash="h", budget=Budget(max_turns=4),
+    )
+    with caplog.at_level(logging.INFO, logger="agent.loop"):
+        run_session(client, ts, session, messages, fallback_text="aa\nbb\ncc")
+    assert session.status == "done"
+    assert any(
+        "解析出 2 条调用" in r.message for r in caplog.records
+    )
+
+
+def test_run_session_reports_activity(tmp_path):
+    """活动行回调：LLM 请求中 / 执行 i/N / 收尾，都经 on_activity 暴露。"""
+    from agent.swe_edit import SweEditToolSet
+
+    ts = SweEditToolSet()
+    client = StubClient(['edit(2, 2, "BB")\nedit(3, 3, "CC")', "done()"])
+    session, messages = start_session(
+        ts, label="swe_edit", task_id="t1", task_input="aa\nbb\ncc",
+        task_meta={}, instruction=INST, workdir=tmp_path / "work",
+        config_hash="h", budget=Budget(max_turns=4),
+    )
+    seen: list[str] = []
+    run_session(
+        client, ts, session, messages, fallback_text="aa\nbb\ncc",
+        on_activity=seen.append,
+    )
+    assert session.status == "done"
+    text = "\n".join(seen)
+    assert "第 1 轮：LLM 请求中" in text
+    assert "第 1 轮：执行 2 条调用" in text
+    assert "收尾（extract）" in text
+
+
 def test_swe_edit_multiline_and_out_of_range(tmp_path):
     import json as _json
 
@@ -501,3 +545,287 @@ def test_toolset_registry_matches_design_doc():
         if name not in _LEGACY_TOOLSET_NAMES and f"`{name}`" not in doc
     ]
     assert not missing, f"09-tools.md 未记录: {missing}"
+
+
+# --- neo 实验臂（plan/neo_experiment.md）：path 抬头 / num-key 视图 ---
+
+
+def test_find_replace_anthropic_loop_roundtrip(tmp_path):
+    from agent.standard import FindReplaceAnthropicToolSet
+
+    session, _ = run_one(
+        FindReplaceAnthropicToolSet(),
+        ['find_replace(text, "wrld", "world")\ndone()'],
+        tmp_path,
+    )
+    assert session.status == "done"
+    assert session.output == "hello world"
+
+
+def test_find_replace_anthropic_rejects_non_unique(tmp_path):
+    from agent.standard import FindReplaceAnthropicToolSet
+
+    ts = FindReplaceAnthropicToolSet()
+    state = ts.make_tool_state("aba aba", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'text, "a", "x"'), state)
+    assert not res.ok and "Found 4 matches" in res.feedback
+    assert state["text"] == "aba aba"  # 拒绝执行，不改动
+    res = ts.invoke(ToolCall("find_replace", 'text, "zzz", "x"'), state)
+    assert not res.ok and "PATTERN_NOT_FOUND" in res.feedback
+    assert state["text"] == "aba aba"
+
+
+def test_find_replace_anthropic_rejects_unknown_path(tmp_path):
+    from agent.standard import FindReplaceAnthropicToolSet
+
+    ts = FindReplaceAnthropicToolSet()
+    state = ts.make_tool_state("abc", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'other, "a", "x"'), state)
+    assert not res.ok and "unknown path" in res.feedback
+    assert state["text"] == "abc"
+
+
+def test_anthropic_present_has_path_header(tmp_path):
+    from agent.standard import FindReplaceAnthropicToolSet, RewriteAnthropicToolSet
+
+    for ts in (FindReplaceAnthropicToolSet(), RewriteAnthropicToolSet()):
+        state = ts.make_tool_state("abc", {}, tmp_path)
+        assert ts.present_input("abc", state) == "--- [Text: text] ---\nabc"
+
+
+def test_rewrite_numkey_presents_numkey_view(tmp_path):
+    from agent.numkey import RewriteNumkeyToolSet
+
+    ts = RewriteNumkeyToolSet()
+    state = ts.make_tool_state("ab\ncd\n", {}, tmp_path)
+    payload = ts.present_input("ab\ncd\n", state)
+    assert payload == "--- [Text: text] ---\n1: ab\n2: cd\n"
+    assert "num-key" in ts.prompt_clause  # 共享 view description 在场
+
+
+def test_find_replace_numkey_retry_after_conflict(tmp_path):
+    from agent.numkey import FindReplaceNumkeyToolSet
+
+    session, _ = run_one(
+        FindReplaceNumkeyToolSet(),
+        # 第一轮 old 不唯一被拒（对话通道反馈），第二轮带足上下文成功
+        ['find_replace(text, "l", "L")', 'find_replace(text, "wrld", "world")\ndone()'],
+        tmp_path,
+        budget=Budget(max_turns=4),
+    )
+    assert session.status == "done"
+    assert len(session.turns) == 2
+    assert "Found 3 matches" in session.turns[0].results[0].feedback
+    assert session.output == "hello world"
+
+
+def test_find_replace_numkey_keys_stable_after_edit(tmp_path):
+    from agent.numkey import FindReplaceNumkeyToolSet
+
+    ts = FindReplaceNumkeyToolSet()
+    state = ts.make_tool_state("teh cat\nfine dog\n", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'text, "teh", "the"'), state)
+    assert res.ok
+    # 编辑后 num-key 不重排：块 2 的 key 仍是 2
+    assert ts.invoke(ToolCall("read", "text"), state).feedback == (
+        "1: the cat\n2: fine dog\n"
+    )
+
+
+def test_find_replace_numkey_cross_block(tmp_path):
+    from agent.numkey import FindReplaceNumkeyToolSet
+
+    ts = FindReplaceNumkeyToolSet()
+    state = ts.make_tool_state("ab\ncd\n", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'text, "b\\nc", "B\\nC"'), state)
+    assert res.ok
+    assert ts.extract(state, None).text == "aB\nCd\n"
+
+
+def test_find_replace_blocked_same_tools_extra_clause():
+    """blocked 与 numkey 共用同一工具实现，唯一差别是注意力控制条款。"""
+    from agent.numkey import (
+        ATTENTION_CLAUSE,
+        FIND_REPLACE_NUMKEY_CLAUSE,
+        NUMKEY_VIEW_CLAUSE,
+        FindReplaceBlockedToolSet,
+        FindReplaceNumkeyToolSet,
+    )
+    from agent.standard import ONE_SHOT_NOTICE_TOOLS
+
+    plain = FindReplaceNumkeyToolSet.prompt_clause
+    blocked = FindReplaceBlockedToolSet.prompt_clause
+    # 两者共享 view description 与同一 tool prompt；blocked 多注意力条款
+    for text in (NUMKEY_VIEW_CLAUSE, FIND_REPLACE_NUMKEY_CLAUSE):
+        assert text in plain and text in blocked
+    assert ATTENTION_CLAUSE in blocked and ATTENTION_CLAUSE not in plain
+    # 1-shot 告知在两臂都在最后
+    assert plain.endswith(ONE_SHOT_NOTICE_TOOLS)
+    assert blocked.endswith(ONE_SHOT_NOTICE_TOOLS)
+
+
+def test_neo_arms_all_end_with_one_shot_notice():
+    """neo 实验组全部 1-shot：六个臂的 prompt_clause 末尾都有一次性告知。"""
+    from agent.numkey import (
+        FindReplaceBlockedToolSet,
+        FindReplaceNumkeyToolSet,
+        PatchFindReplaceNoattToolSet,
+        PatchFindReplaceToolSet,
+        PatchFindReplaceUnstableToolSet,
+        RewriteNumkeyToolSet,
+    )
+    from agent.standard import (
+        ONE_SHOT_NOTICE_REWRITE,
+        ONE_SHOT_NOTICE_TOOLS,
+        FindReplaceAnthropicToolSet,
+        RewriteAnthropicToolSet,
+    )
+
+    for cls in (
+        FindReplaceAnthropicToolSet,
+        FindReplaceNumkeyToolSet,
+        FindReplaceBlockedToolSet,
+        PatchFindReplaceToolSet,
+        PatchFindReplaceNoattToolSet,
+        PatchFindReplaceUnstableToolSet,
+    ):
+        assert cls.prompt_clause.endswith(ONE_SHOT_NOTICE_TOOLS), cls.__name__
+    for cls in (RewriteAnthropicToolSet, RewriteNumkeyToolSet):
+        assert cls.prompt_clause.endswith(ONE_SHOT_NOTICE_REWRITE), cls.__name__
+
+
+def test_patch_find_replace_scoped_unique_and_stable_keys(tmp_path):
+    from agent.numkey import PatchFindReplaceToolSet
+
+    ts = PatchFindReplaceToolSet()
+    state = ts.make_tool_state("the cat\ntha dog\n", {}, tmp_path)
+    payload = ts.present_input("the cat\ntha dog\n", state)
+    assert payload == "--- [Text: text] ---\n1: the cat\n2: tha dog\n"
+    res = ts.invoke(ToolCall("find_replace", 'text, 2, "tha", "the"'), state)
+    assert res.ok and "2: the dog" in res.feedback  # 回显被改块，key 不变
+    assert ts.extract(state, None).text == "the cat\nthe dog\n"
+    # key 稳定：编辑后 num-key 不重排
+    assert ts.invoke(ToolCall("read", "text"), state).feedback == (
+        "1: the cat\n2: the dog\n"
+    )
+
+
+def test_numkey_turn_end_flush(tmp_path):
+    """落盘节奏：轮内编辑只推进内存快照，flush 时才一次性写盘。
+
+    一轮 2 条编辑 + done ⇒ snapshots 目录恰为 2 份（初始 + 轮末 flush），
+    而不是逐编辑 3 份；产出不受影响。
+    """
+    from agent.numkey import PatchFindReplaceToolSet
+
+    ts = PatchFindReplaceToolSet()
+    client = StubClient([
+        'find_replace(text, 1, "aa", "AA")\n'
+        'find_replace(text, 2, "bb", "BB")\n'
+        "done()",
+    ])
+    session, messages = start_session(
+        ts, label="patch_find_replace", task_id="t1", task_input="aa\nbb\ncc\n",
+        task_meta={}, instruction=INST, workdir=tmp_path / "work",
+        config_hash="h", budget=Budget(max_turns=1),
+    )
+    run_session(client, ts, session, messages, fallback_text="aa\nbb\ncc\n")
+    assert session.status == "done"
+    assert session.output == "AA\nBB\ncc\n"
+    snapshots = list((tmp_path / "work" / "session" / "snapshots").iterdir())
+    assert len(snapshots) == 2  # 初始 + 轮末 flush；逐编辑的中间态不落盘
+
+
+def test_patch_find_replace_uniqueness_scoped_to_block(tmp_path):
+    from agent.numkey import PatchFindReplaceToolSet
+
+    ts = PatchFindReplaceToolSet()
+    state = ts.make_tool_state("same\nsame\n", {}, tmp_path / "a")
+    # 全局 2 处、块 1 内唯一 ⇒ 成功
+    res = ts.invoke(ToolCall("find_replace", 'text, 1, "same", "fixed"'), state)
+    assert res.ok
+    assert ts.extract(state, None).text == "fixed\nsame\n"
+    # 块内 2 处 ⇒ 拒绝且不改动
+    state2 = ts.make_tool_state("la la\n", {}, tmp_path / "b")
+    res = ts.invoke(ToolCall("find_replace", 'text, 1, "la", "x"'), state2)
+    assert not res.ok and "Found 2 matches" in res.feedback
+    assert ts.extract(state2, None).text == "la la\n"
+
+
+def test_patch_find_replace_unknown_key_and_op_rejection(tmp_path):
+    from agent.numkey import PatchFindReplaceToolSet
+
+    ts = PatchFindReplaceToolSet()
+    state = ts.make_tool_state("abc\n", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'text, 9, "a", "x"'), state)
+    assert not res.ok and "no block numbered 9" in res.feedback
+    # 清单外操作在 parse 层拒绝（方言只认 read / find_replace / done）
+    with pytest.raises(ToolParseError):
+        ts.parse('set_content(1, "x")')
+
+
+def test_patch_find_replace_noatt_same_impl_without_attention(tmp_path):
+    """noatt 与 patch_find_replace 同一实现，唯一差别 = 无注意力条款。"""
+    from agent.numkey import (
+        ATTENTION_CLAUSE,
+        PATCH_FIND_REPLACE_CLAUSE,
+        PatchFindReplaceNoattToolSet,
+        PatchFindReplaceToolSet,
+    )
+
+    assert issubclass(PatchFindReplaceNoattToolSet, PatchFindReplaceToolSet)
+    assert ATTENTION_CLAUSE not in PatchFindReplaceNoattToolSet.prompt_clause
+    assert ATTENTION_CLAUSE in PatchFindReplaceToolSet.prompt_clause
+    # 行为一致：块内唯一匹配照常工作
+    ts = PatchFindReplaceNoattToolSet()
+    state = ts.make_tool_state("the cat\ntha dog\n", {}, tmp_path)
+    res = ts.invoke(ToolCall("find_replace", 'text, 2, "tha", "the"'), state)
+    assert res.ok
+    assert ts.extract(state, None).text == "the cat\nthe dog\n"
+
+
+def test_patch_find_replace_unstable_renumbers_after_linecount_change(tmp_path):
+    """unstable：外观与 patch_find_replace 相同，但 key 是位置性行号——
+    行数变化的编辑使其后编号重排，同批后续调用的旧 key 即指错。"""
+    from agent.numkey import PatchFindReplaceUnstableToolSet
+
+    ts = PatchFindReplaceUnstableToolSet()
+    state = ts.make_tool_state("a\nb\nc\n", {}, tmp_path)
+    # 外观相同：N: 内容 + path 抬头
+    assert ts.present_input("a\nb\nc\n", state) == "--- [Text: text] ---\n1: a\n2: b\n3: c\n"
+    # 行数不变的编辑：编号碰巧不动
+    res = ts.invoke(ToolCall("find_replace", 'text, 1, "a", "x"'), state)
+    assert res.ok
+    assert ts.invoke(ToolCall("read", "text"), state).feedback == "1: x\n2: b\n3: c\n"
+    # 行数变化的编辑：块内插入换行 ⇒ 全文重排，原 2/3 漂移到 3/4
+    res = ts.invoke(ToolCall("find_replace", 'text, 1, "x", "p\\nq"'), state)
+    assert res.ok
+    assert ts.invoke(ToolCall("read", "text"), state).feedback == "1: p\n2: q\n3: b\n4: c\n"
+    # 旧 key 2 现在指向 "q"——按原始视图写的批量调用在这里即指错
+    res = ts.invoke(ToolCall("find_replace", 'text, 2, "b", "B"'), state)
+    assert not res.ok and "PATTERN_NOT_FOUND" in res.feedback
+    # 产出本身无损
+    assert ts.extract(state, None).text == "p\nq\nb\nc\n"
+
+
+def test_unstable_vs_stable_only_stability_differs():
+    """unstable 与 patch_find_replace：视图外观、工具签名、条款结构相同，
+    只有 view description 的稳定性语义与条款措辞不同。"""
+    from agent.numkey import (
+        ATTENTION_CLAUSE,
+        LINE_NUMBER_VIEW_CLAUSE,
+        NUMKEY_VIEW_CLAUSE,
+        PATCH_FIND_REPLACE_CLAUSE,
+        PATCH_FIND_REPLACE_LINES_CLAUSE,
+        PatchFindReplaceToolSet,
+        PatchFindReplaceUnstableToolSet,
+    )
+
+    assert issubclass(PatchFindReplaceUnstableToolSet, PatchFindReplaceToolSet)
+    stable = PatchFindReplaceToolSet.prompt_clause
+    unstable = PatchFindReplaceUnstableToolSet.prompt_clause
+    assert NUMKEY_VIEW_CLAUSE in stable and LINE_NUMBER_VIEW_CLAUSE in unstable
+    assert PATCH_FIND_REPLACE_CLAUSE in stable
+    assert PATCH_FIND_REPLACE_LINES_CLAUSE in unstable
+    # 注意力条款一致（稳定性是唯一变量）
+    assert ATTENTION_CLAUSE in stable and ATTENTION_CLAUSE in unstable

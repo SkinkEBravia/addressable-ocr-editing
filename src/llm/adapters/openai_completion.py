@@ -21,6 +21,8 @@ from collections.abc import Callable
 import httpx
 
 from llm.adapters._transport import (
+    STREAM_STALL_SECONDS,
+    DeltaStallWatchdog,
     call_with_retries,
     iter_sse_data_lines,
     raise_for_status,
@@ -210,25 +212,35 @@ class OpenAICompletionClient:
         text_parts: list[str] = []
         usage_dict: dict | None = None
         n_data_events = 0
+        stall = DeltaStallWatchdog(STREAM_STALL_SECONDS)
         with client.stream("POST", url, json=payload, headers=headers) as response:
             raise_for_status(response, attempts=attempts)
-            for data in iter_sse_data_lines(response):
+            for data in iter_sse_data_lines(
+                response, stall_timeout=STREAM_STALL_SECONDS
+            ):
                 n_data_events += 1
                 try:
                     obj = json.loads(data)
                 except ValueError:
                     continue  # 半行 / 心跳，跳过
+                progressed = False
                 if isinstance(obj.get("usage"), dict):
                     usage_dict = obj["usage"]
                 for choice in obj.get("choices") or []:
                     delta = choice.get("delta") or {}
                     piece = delta.get("content")
                     if isinstance(piece, str) and piece:
+                        progressed = True
                         text_parts.append(piece)
                         on_delta(piece)
                     thinking = delta.get("reasoning_content")
                     if isinstance(thinking, str) and thinking:
+                        progressed = True
                         on_delta(thinking)  # 思考过程也可观测
+                if progressed:
+                    stall.feed()
+                else:
+                    stall.check(context="completion chunk 无增量")
         if n_data_events == 0:
             raise LLMError(
                 Failure(

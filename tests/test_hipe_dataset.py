@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from datasetkit import load_dataset, resolve
+from datasetkit import Task, load_dataset, resolve
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,3 +113,17 @@ def test_doc_scorer_aligned(dataset):
     assert record["chunks_aligned"] == 1.0
     assert record["n_chunks"] == 51.0
     assert record["cmer"] == pytest.approx(record["cmer_hyp"])
+
+
+def test_key_leak_metric(dataset):
+    """key 泄漏：产出行首出现 num-key 形态前缀即计数（单列，不进 broken）。"""
+    task = Task(
+        task_id="t/synth",
+        input="hello wrld\n",
+        reference="hello world\n",
+        meta={},
+    )
+    clean = dataset.scorer().score("hello world\n", task)
+    assert clean["key_leak"] == 0.0
+    leaked = dataset.scorer().score("1: hello world\n12: extra\n", task)
+    assert leaked["key_leak"] == 2.0

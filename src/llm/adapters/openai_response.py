@@ -17,12 +17,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
+from collections import Counter
 from collections.abc import Callable
 
 import httpx
 
 from llm.adapters._transport import (
+    STREAM_STALL_SECONDS,
+    DeltaStallWatchdog,
     Retryable,
     call_with_retries,
     iter_sse_data_lines,
@@ -33,6 +37,8 @@ from llm.errors import ConfigError, Failure, LLMError
 from llm.types import Completion, Message, Usage
 
 __all__ = ["OpenAIResponseClient"]
+
+_stream_log = logging.getLogger("llm.stream")
 
 _REASONING_EFFORT_VALUES = ("low", "medium", "high")
 
@@ -117,7 +123,8 @@ def _failed_event_error(obj: dict, *, attempts: int) -> Exception:
     error = resp.get("error") if isinstance(resp.get("error"), dict) else {}
     code = str(error.get("code") or "")
     message = str(error.get("message") or "response.failed")
-    if "rate_limit" in code:
+    if "rate_limit" in code or "burst" in code.lower():
+        # 火山的 RequestBurstTooFast（突发流量保护）本质是限流，走 rate_limit 退避
         return Retryable(f"response.failed: {message}", kind="rate_limit")
     if "server" in code:
         return Retryable(f"response.failed: {message}", kind="server")
@@ -254,11 +261,24 @@ class OpenAIResponseClient:
         final_response: dict | None = None
         final_event: str | None = None
         n_data_events = 0
+        event_counts: Counter = Counter()
+        stall = DeltaStallWatchdog(STREAM_STALL_SECONDS)
+        t_start = time.monotonic()
+        _stream_log.info(
+            "model=%s attempt=%d stream start", self._config.name, attempts
+        )
         with client.stream(
             "POST", url, json=payload, headers=headers
         ) as response:
             raise_for_status(response, attempts=attempts)
-            for data in iter_sse_data_lines(response):
+            for data in iter_sse_data_lines(
+                response, stall_timeout=STREAM_STALL_SECONDS
+            ):
+                if n_data_events == 0:
+                    _stream_log.info(
+                        "model=%s attempt=%d first data event at %.1fs",
+                        self._config.name, attempts, time.monotonic() - t_start,
+                    )
                 n_data_events += 1
                 try:
                     obj = json.loads(data)
@@ -266,7 +286,11 @@ class OpenAIResponseClient:
                     continue  # 半行 / 心跳，跳过
                 if not isinstance(obj, dict):
                     continue
-                event = obj.get("type")
+                event = str(obj.get("type"))
+                event_counts[event] += 1
+                if event == "response.failed":
+                    # 终结错误优先于停滞判定（burst → rate_limit 重试通道）
+                    raise _failed_event_error(obj, attempts=attempts)
                 if event in (
                     "response.output_text.delta",
                     "response.reasoning_text.delta",
@@ -274,16 +298,21 @@ class OpenAIResponseClient:
                 ):
                     piece = obj.get("delta")
                     if isinstance(piece, str) and piece:
+                        stall.feed()
                         if event == "response.output_text.delta":
                             text_parts.append(piece)
                         on_delta(piece)  # 思考增量同样可观测
-                elif event == "response.failed":
-                    raise _failed_event_error(obj, attempts=attempts)
+                    else:
+                        # 空 delta 不算产出，但要过增量级看门狗
+                        stall.check(context=f"last_event={event}")
                 elif event in ("response.completed", "response.incomplete"):
                     final_event = event
                     resp = obj.get("response")
                     if isinstance(resp, dict):
                         final_response = resp
+                else:
+                    # 非增量事件（in_progress 心跳等）：过增量级看门狗
+                    stall.check(context=f"last_event={event}")
 
         if n_data_events == 0:
             # 200 但流里一条 data 事件都没有：对方没在讲这个协议
@@ -300,6 +329,13 @@ class OpenAIResponseClient:
         if not text and final_response is not None:
             # 端点若不在 delta 里给文本，兜底从最终响应提取
             text = _text_from_output(final_response.get("output")) or ""
+        _stream_log.info(
+            "model=%s attempt=%d stream end: data_events=%d chars=%d "
+            "final_event=%s elapsed=%.0fs events=%s",
+            self._config.name, attempts, n_data_events, len(text),
+            final_event, time.monotonic() - t_start,
+            dict(event_counts.most_common(8)),
+        )
         if not text:
             raise LLMError(
                 Failure(
@@ -310,6 +346,7 @@ class OpenAIResponseClient:
                     detail={
                         "final_event": final_event,
                         "data_events": n_data_events,
+                        "event_counts": dict(event_counts),
                         "response_status": (final_response or {}).get("status"),
                         "incomplete_details": (final_response or {}).get(
                             "incomplete_details"

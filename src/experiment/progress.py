@@ -43,6 +43,9 @@ class ProgressReporter(Protocol):
     - `close()`：运行结束（含 Ctrl+C 的 finally），释放终端资源。
 
     可选能力：`delta(text: str)` —— 流式观察订阅。实现了才会被喂增量。
+    可选能力：`activity(text: str)` —— 阶段活动行（LLM 请求中 / 执行 i/N /
+    收尾），loop 经 run 层喂入；实现了才会被喂。并发下多 cell 共享一行，
+    后写覆盖（仅作「程序在做什么」的指示）。
     """
 
     def begin(self, total: int) -> None: ...
@@ -60,6 +63,7 @@ class NullProgress:
     def turn(self, session: Session) -> None: ...
     def end_cell(self, label: str, session: Session, elapsed_s: float) -> None: ...
     def close(self) -> None: ...
+    def activity(self, text: str) -> None: ...
 
 
 class RichProgress:
@@ -112,6 +116,7 @@ class RichProgress:
         self._delta_events: collections.deque = collections.deque()  # (t, 字符数)
         self._last_delta: float | None = None  # 最近一次增量的时刻（停滞诊断）
         self._last_event = ""
+        self._activity = ""  # 阶段活动行（loop 喂入，后写覆盖）
 
     # -- 生命周期 -------------------------------------------------------------
 
@@ -167,6 +172,18 @@ class RichProgress:
             now = time.monotonic()
             self._delta_events.append((now, len(text)))
             self._last_delta = now
+
+    def activity(self, text: str) -> None:
+        """阶段活动行：LLM 请求中 / 执行 i/N / 收尾。增量停更时它区分
+        「流停滞」与「本地逐条执行大批量调用」。"""
+        with self._lock:
+            self._activity = text
+            tty = self._tty
+            if not tty:
+                self._stream.write(f"[activity] {text}\n")
+                self._stream.flush()
+        if tty:
+            self._refresh()
 
     def turn(self, session: Session) -> None:
         with self._lock:
@@ -242,8 +259,13 @@ class RichProgress:
                     event = (
                         f"  最近: {progress._last_event}" if progress._last_event else " "
                     )
+                    activity = (
+                        f"  活动: {progress._activity}" if progress._activity else " "
+                    )
                     return Group(
-                        Text(progress._status_line_locked()), Text(event)
+                        Text(progress._status_line_locked()),
+                        Text(activity),
+                        Text(event),
                     )
 
         return _Dynamic()

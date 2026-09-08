@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -21,7 +22,10 @@ from llm import Failure, LLMClient, LLMError, Message
 
 __all__ = ["start_session", "run_session"]
 
+logger = logging.getLogger("agent.loop")
+
 _TRACEBACK_TAIL = 2000
+_LOG_EVERY_N_CALLS = 50  # 大批量调用时每隔 N 条报一次执行进度
 
 
 def start_session(
@@ -76,21 +80,38 @@ def run_session(
     fallback_text: str,
     on_turn: Callable[[Session], None] | None = None,
     on_delta: Callable[[str], None] | None = None,
+    on_activity: Callable[[str], None] | None = None,
 ) -> Session:
     """多轮 agent loop；就地推进 session 并返回它。
 
     fallback_text = 失败时的回退产出（原文）。
+    on_activity：阶段可观测回调（LLM 请求中 / 执行 i/N / 收尾），
+    experiment 借此驱动进度显示的活动行；纯观察，不影响语义。
     """
     if session.failure is not None:  # 组装期已失败
         return session
+
+    label = f"{session.task_id} × {session.toolset}"
+
+    def activity(msg: str) -> None:
+        if on_activity is not None:
+            on_activity(f"{label} | {msg}")
+
     if not toolset.uses_llm:  # noop：零轮迭代
         session.status = "done"
         _finish_with_extract(toolset, session, fallback_text)
         return session
 
+    def flush_state() -> None:
+        """轮末持久化钩子：工具集实现了 flush 才调用（见 09 工具契约）。"""
+        flush = getattr(toolset, "flush", None)
+        if flush is not None:
+            flush(session.tool_state)
+
     done = False
     while len(session.turns) < session.budget.max_turns:
         index = len(session.turns)
+        activity(f"第 {index + 1} 轮：LLM 请求中")
         try:
             completion = client.complete(messages, on_delta=on_delta)
         except LLMError as exc:  # 失败通道
@@ -104,6 +125,11 @@ def run_session(
         try:
             outcome = toolset.parse(completion.text)
         except ToolParseError as exc:  # 对话通道
+            logger.info(
+                "task=%s toolset=%s turn=%d parse error: %s",
+                session.task_id, session.toolset, index, exc,
+            )
+            activity(f"第 {index + 1} 轮：parse error，回灌对话")
             session.turns.append(Turn(index, request, completion, parse_error=str(exc)))
             if on_turn is not None:
                 on_turn(session)
@@ -111,6 +137,22 @@ def run_session(
             continue
 
         if isinstance(outcome, Done):
+            activity(f"第 {index + 1} 轮：done，收尾")
+            try:
+                flush_state()
+            except Exception as exc:  # 落盘失败 = 环境问题：失败通道
+                session.turns.append(Turn(index, request, completion))
+                session.failure = Failure(
+                    stage="tool",
+                    kind="tool_persist",
+                    message=f"{type(exc).__name__}: {exc}",
+                    detail={"traceback": traceback.format_exc()[-_TRACEBACK_TAIL:]},
+                )
+                session.status = "failed:tool_persist"
+                session.output = fallback_text
+                if on_turn is not None:
+                    on_turn(session)
+                return session
             session.turns.append(Turn(index, request, completion))
             if on_turn is not None:
                 on_turn(session)
@@ -119,10 +161,21 @@ def run_session(
 
         results = []
         finish = False
-        for call in outcome:  # 同轮多调用按序，后续看到前面结果
+        n_calls = len(outcome)
+        if n_calls:
+            logger.info(
+                "task=%s toolset=%s turn=%d 解析出 %d 条调用，开始逐条执行",
+                session.task_id, session.toolset, index, n_calls,
+            )
+            activity(f"第 {index + 1} 轮：执行 {n_calls} 条调用")
+        for i, call in enumerate(outcome):  # 同轮多调用按序，后续看到前面结果
             try:
                 result = toolset.invoke(call, session.tool_state)
             except Exception as exc:  # 意外异常 = 我们的 bug：失败通道
+                try:
+                    flush_state()
+                except Exception:
+                    logger.exception("task=%s 失败后 flush 也失败", session.task_id)
                 session.turns.append(
                     Turn(index, request, completion, tuple(outcome[: len(results)]),
                          tuple(results))
@@ -140,6 +193,29 @@ def run_session(
                 return session
             results.append(result)
             finish = finish or result.finish
+            if (i + 1) % _LOG_EVERY_N_CALLS == 0:
+                logger.info(
+                    "task=%s toolset=%s turn=%d 已执行 %d/%d 条调用",
+                    session.task_id, session.toolset, index, i + 1, n_calls,
+                )
+                activity(f"第 {index + 1} 轮：执行 {i + 1}/{n_calls} 条调用")
+        try:
+            flush_state()
+        except Exception as exc:  # 落盘失败 = 环境问题：失败通道
+            session.turns.append(
+                Turn(index, request, completion, tuple(outcome), tuple(results))
+            )
+            session.failure = Failure(
+                stage="tool",
+                kind="tool_persist",
+                message=f"{type(exc).__name__}: {exc}",
+                detail={"traceback": traceback.format_exc()[-_TRACEBACK_TAIL:]},
+            )
+            session.status = "failed:tool_persist"
+            session.output = fallback_text
+            if on_turn is not None:
+                on_turn(session)
+            return session
         session.turns.append(
             Turn(index, request, completion, tuple(outcome), tuple(results))
         )
@@ -159,6 +235,7 @@ def run_session(
         ):
             break
 
+    activity("收尾（extract）")
     session.status = "done" if done else "budget_exceeded"
     _finish_with_extract(toolset, session, fallback_text)
     return session

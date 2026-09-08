@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 
 import httpx
 import pytest
@@ -15,6 +17,7 @@ from llm.adapters import _transport
 from llm.adapters.anthropic import AnthropicClient
 from llm.adapters.openai_completion import OpenAICompletionClient
 from llm.adapters.openai_response import OpenAIResponseClient
+from llm.types import Completion
 
 KEY = "sk-test-secret"
 
@@ -282,6 +285,118 @@ def test_response_stream_failed_rate_limit_is_retried():
     )
     comp = client.complete(MSGS, on_delta=lambda s: None)
     assert comp.text == "ok" and calls == 2  # 重试通道生效
+
+
+def test_response_stream_failed_burst_is_retried():
+    """火山的 RequestBurstTooFast（突发流量保护）= 限流，退避后重试。"""
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200,
+                content=sse(
+                    {
+                        "type": "response.failed",
+                        "response": {
+                            "status": "failed",
+                            "error": {
+                                "code": "RequestBurstTooFast",
+                                "message": "System protection triggered by request burst.",
+                            },
+                        },
+                    }
+                ),
+            )
+        return httpx.Response(200, content=sse(
+            {"type": "response.output_text.delta", "delta": "ok"},
+            {"type": "response.completed", "response": _resp_payload("ok")},
+        ))
+
+    client = OpenAIResponseClient(
+        make_config("openai-response"), KEY, http_client=mock_client(handler)
+    )
+    comp = client.complete(MSGS, on_delta=lambda s: None)
+    assert comp.text == "ok" and calls == 2
+
+
+# ---------------------------------------------------------------- 流式停滞看门狗
+
+
+class _StubStreamResponse:
+    """iter_lines + close 的鸭子类型桩；hang=True 时 lines 发完后挂住（模拟无终结事件）。"""
+
+    def __init__(self, lines: list[str], gap: float = 0.0, hang: bool = True):
+        self._lines = lines
+        self._gap = gap
+        self._hang = hang
+        self.closed = False
+
+    def iter_lines(self):
+        for line in self._lines:
+            if self.closed:
+                return
+            if self._gap:
+                time.sleep(self._gap)
+            yield line
+        while self._hang and not self.closed:  # 挂住：连接开着但不再来数据
+            time.sleep(0.01)
+
+    def close(self):
+        self.closed = True
+
+
+def test_sse_stall_aborts_despite_heartbeats():
+    """心跳注释行不重置停滞计时：只来心跳也照掐。"""
+    resp = _StubStreamResponse([": ping"] * 1000, gap=0.01)
+    t0 = time.monotonic()
+    with pytest.raises(_transport.Retryable) as ei:
+        list(_transport.iter_sse_data_lines(resp, stall_timeout=0.2))
+    assert ei.value.kind == "timeout"
+    assert resp.closed  # 掐流让 pump 线程退出
+    assert time.monotonic() - t0 < 5
+
+
+def test_sse_data_flow_no_stall():
+    """data 行持续到达（间隔 < 阈值）不触发看门狗，全部照常产出。"""
+    lines = [f"data: {json.dumps({'n': i})}" for i in range(5)]
+    resp = _StubStreamResponse(lines, gap=0.05, hang=False)
+    got = list(_transport.iter_sse_data_lines(resp, stall_timeout=0.5))
+    assert len(got) == 5
+
+
+def test_retry_logged(caplog):
+    """重试通道的每次退避都落日志（llm.transport），含 kind 与 attempt。"""
+    def fn(a: int):
+        if a == 1:
+            raise _transport.Retryable("boom", kind="rate_limit")
+        return Completion(text="ok", usage=None)
+
+    with caplog.at_level(logging.WARNING, logger="llm.transport"):
+        comp = _transport.call_with_retries(make_config("openai-response"), fn)
+    assert comp.text == "ok"
+    assert any(
+        "rate_limit" in r.message and "attempt=1" in r.message
+        for r in caplog.records
+    )
+
+
+def test_delta_stall_watchdog():
+    """增量级看门狗：假时钟下 feed 重置计时，超阈值抛 Retryable(timeout)。"""
+    clock = {"t": 1000.0}
+    dog = _transport.DeltaStallWatchdog(300.0, now=lambda: clock["t"])
+    clock["t"] += 299.0
+    dog.check()  # 299s 未到阈值
+    dog.feed()   # 有增量，重置
+    clock["t"] += 299.0
+    dog.check()
+    clock["t"] += 2.0  # 距上次 feed 301s
+    with pytest.raises(_transport.Retryable) as ei:
+        dog.check(context="last_event=response.in_progress")
+    assert ei.value.kind == "timeout"
+    assert "in_progress" in str(ei.value)
 
 
 # ---------------------------------------------------------------- openai-completion

@@ -125,8 +125,8 @@ Failure = { stage: "llm",                  # 失败阶段（09 另定义 tool / 
 
 | kind | 含义 | 通道 |
 |---|---|---|
-| `timeout` | 超时 / 网络断连（含对端无响应断开），重试耗尽后 | 重试 → 失败 |
-| `rate_limit` | HTTP 429，尊重 `Retry-After` | 重试 → 失败 |
+| `timeout` | 超时 / 网络断连（含对端无响应断开）；流式停滞（距上条 SSE data 行超 `STREAM_STALL_SECONDS`=300s，心跳注释行不重置计时，看门狗掐流），重试耗尽后 | 重试 → 失败 |
+| `rate_limit` | HTTP 429，尊重 `Retry-After`；`response.failed` 且错误码含 `rate_limit` 或 `burst`（火山 `RequestBurstTooFast` 突发流量保护，本质是限流） | 重试 → 失败 |
 | `server` | HTTP 5xx | 重试 → 失败 |
 | `auth` | HTTP 401 / 403 | 失败（不重试） |
 | `rejected` | 其余 HTTP 非 2xx（400 / 404 / 409 / 422 …），`http_status` 必录 | 失败（不重试） |
@@ -136,6 +136,13 @@ Failure = { stage: "llm",                  # 失败阶段（09 另定义 tool / 
 - `incomplete` 单列的理由：它常是「模型把输出预算烧在 reasoning 上」或端点抽风——同参数重试是否值得**由实测决定，不猜**；单列后报告里可单独统计。
 - 重试通道内：指数退避（1s, 2s, 4s, … 封顶 60s），端点给了 `Retry-After` 则从其值。
 - **语义失败不是本层的事**：输出不合方言、工具报错等由 loop 作为对话反馈处理（见 [09](09-tools.md)），client 不知情。
+
+### 可观测性
+
+- **运行日志**：experiment CLI 把 `llm` 与 `agent` 两个 logger 落到 `<out>/logs/run.log`（追加，不进控制台以免打 Live）。记录每次重试（model / attempt / kind / 退避秒数）、流式停滞掐流、重试耗尽，以及每个流式 attempt 的开始 / 首条 data 事件（TTFT）/ 收尾统计（data_events、chars、final_event、elapsed）；agent.loop 另记每轮解析出的调用数与大批量调用的执行进度（每 50 条一行）——「LLM 已完成但 cell 不收尾」就是在逐条执行海量调用，看这个文件区分。
+- **停滞看门狗（两层）**：行级——`iter_sse_data_lines(stall_timeout=STREAM_STALL_SECONDS)`（`_transport.py`，默认 300s），距上一条 SSE **data 行**超时即掐流重试，心跳注释行不重置计时。增量级——`DeltaStallWatchdog`（同文件，各适配器 `_stream` 内），距上一个**非空文本增量**超 300s 即 `Retryable(kind="timeout")`；专治「连接活着、心跳 data 事件照发、但 token 归零」的挂死（火山长流的中后段即此形态）。
+- 流式收尾日志带事件类型分布（`events={...}`），incomplete 磁带的 `detail.event_counts` 同录——判断「增量归零期间端点还在发什么」直接看这个。
+- 进度条的 out tok 是**全局跨 cell 累计**（轮末端点 usage 覆盖式写入），不代表单个 cell 的输出长度。
 
 ## 验收
 

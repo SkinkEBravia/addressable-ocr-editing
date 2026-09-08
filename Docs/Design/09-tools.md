@@ -84,6 +84,7 @@ class Failure:                                       # 三通道之「失败通�
 - `Done` = 模型自判完成。标记形式：`done()`（或 `done`）——可单独一行，**也可作为消息最后一行**（先按序执行前面的调用，再由工具返回 `finish=True` 收束）；出现在中间则判方言错误。
 - `ToolResult = { ok: bool, feedback: str, finish: bool = False }`；`feedback` 原样作为 user 消息进入下一轮——**工具报错即对话反馈**，无独立重试机制。`finish=True` = 工具侧宣告对话完成（顺序任务的自然终止，如逐单元修复的末单元）：loop 在本轮落盘后以 `done` 收束，不再追加 feedback。
 - 工具集构造运行环境：`make_tool_state(task_input, task_meta, workdir) -> dict`（loop 在 Session 开始时调用一次）。
+- 可选钩子 `flush(tool_state)`：轮末持久化。loop 在每轮 `on_turn` 前调用（若有）。用途：IR-backed 工具集轮内只在内存推进快照、轮末一次性落盘（逐编辑 save 在慢盘/挂载卷上是千次级文件操作/编辑——快照粒度 = 轮，逐调用审计由磁带的 calls/results 承担）。numkey 臂与 swe_edit 采用此节奏；patch / sequential 仍是逐次落盘（不在当前 units，用到再迁）。flush 失败记 `Failure(stage="tool", kind="tool_persist")` 进失败通道。
 - **agent 对块的定位一律用 `AgentBlockId`**（见 [06](06-view.md#agentidstrategy)）：工具参数、prompt_clause 示例、feedback 中的块标识都是 Agent 侧 id；工具集与 loop 不得把 `BlockKey` 泄漏进对话。
 
 ### 工具资产与 workdir 生命周期
@@ -152,9 +153,10 @@ def run_session(client: LLMClient, toolset: ToolSet, session: Session,
 2. `ToolParseError` 与 `ToolResult(ok=False)` 走**对话通道**：作为 feedback 进下一轮，不进异常。
 3. `LLMError` 走**失败通道**：`session.failure = exc.failure`，`status = failed:<kind>`，回退产出 = 原文。
 4. 工具 `invoke` 的**意外异常**（非领域错误的 `ToolResult`）：catch 后记 `Failure(stage="tool")` 并 fail——这是我们的 bug，不喂给模型浪费轮次；`detail` 带 traceback 摘要。
-5. 每轮完成即 `on_turn(session)` 回调（experiment 借此增量落盘）；`on_delta` 原样透传 client 的观察通道。
+5. 每轮完成即 `on_turn(session)` 回调（experiment 借此增量落盘）；`on_delta` 原样透传 client 的观察通道。轮末 `on_turn` 前先调工具集的可选 `flush(tool_state)` 钩子（轮末持久化，见「工具契约」）。
 6. 轮内不截断历史；历史管理（压缩/截断）不在本版。
 7. `uses_llm = False`（noop）：零轮迭代，`status = done`，`extract` 回原文。
+8. 执行阶段可观测：每轮 `parse` 出的调用数、大批量执行的进度（每 50 条一行）、parse error 都写 `agent.loop` 日志（experiment CLI 落 `<out>/logs/run.log`，见 [08](08-llm.md)「可观测性」）；同样的阶段信号经可选回调 `on_activity(text)` 暴露给进度报告器（`LLM 请求中 / 执行 i/N / 收尾`）——「LLM 已收尾但 cell 不结束」多半是在逐条执行海量调用，活动行与日志据此把它和流停滞区分开。
 
 确定性验收：同一 (StubClient 剧本, task, toolset, budget) 运行两次 ⇒ Session 逐字段相同。
 
@@ -188,6 +190,19 @@ extract: (tool_state, session) -> SourceText   # SourceText 见 01（text + enco
 | `patch_global_seq` | `run_patch`（**全局作用域**） | 前缀命名空间块 id（`c0:b1`、`c1:b2`），可跨单元路由，**允许回溯编辑此前呈现过的任何单元** |
 | `swe_edit_global_seq` | `edit`（**全局作用域**） | 显式文件寻址（`edit chunk_0 1:2`），行号作用域被文件名隔离 |
 | `find_replace_global_seq` | `find_replace`（**全局作用域**） | 替换作用于当前及历史全部已呈现单元 |
+| `rewrite_anthropic_style`〔neo 实验1 臂〕 | 空 | `rewrite` + path 抬头视图（`--- [Text: text] ---` + 纯原文） |
+| `find_replace_anthropic_style`〔neo 实验1 臂〕 | `read(path)` / `find_replace(path, "old", "new")` | 对齐 Anthropic `str_replace`：`old` 在整个 path 必须恰好出现一次（0 或 >1 拒绝执行并回报冲突数），与 `find_replace` 的 replace-all 相对 |
+| `rewrite_numkey`〔neo 实验2 臂〕 | 空 | `rewrite` + num-key 视图（`numkey` 策略 + `cat_n`，key 稳定不进产出） |
+| `find_replace_numkey`〔neo 实验2 臂〕 | `read(path)` / `find_replace(path, "old", "new")` | num-key 视图 + path 内唯一匹配；工具语义与 `find_replace_anthropic_style` 一致，key 只「看得见」 |
+| `find_replace_blocked`〔neo 实验2 臂〕 | 同上 | = `find_replace_numkey` + 注意力控制条款（**同一实现**，只有 `prompt_clause` 不同） |
+| `patch_find_replace`〔neo 实验2 臂〕 | `read(path)` / `find_replace(path, key, "old", "new")` | num-key 定位 + **块内**唯一匹配；清单外操作在 parse 层拒绝（方言只认 `read` / `find_replace` / `done`），与 `patch_replace` 的 `allowed_ops` 同一原则 |
+| `patch_find_replace_noatt`〔neo 实验2 臂〕 | 同上 | `patch_find_replace` 的无注意力条款变体（**同一实现**，仅 `prompt_clause` 不含注意力条款）；与 `find_replace_numkey` 配对成「注意力 × 用 key 定位」的 2×2 |
+| `patch_find_replace_unstable`〔neo 实验2 臂〕 | `read(path)` / `find_replace(path, line, "old", "new")` | `patch_find_replace` 的**位置性行号**变体：外观完全相同，但每次编辑后全文重 partition，编号按位置重排（`line_number` 策略）；key 漂移语义如实写进提示词 |
+
+> [!note] neo 实验臂全部 1-shot（plan/neo_experiment.md 实验组口径）
+> 八个 `*_anthropic_style` / `*_numkey` / `find_replace_blocked` / `patch_find_replace*`
+> 臂的 toml 均为 `max_turns=1`，且 `prompt_clause` 末尾逐字追加一次性告知
+> （`agent.standard.ONE_SHOT_NOTICE_*`）：无反馈、无重试、无第二轮。
 
 ### 作用域：单轮 / 局部顺序 / 全局顺序
 

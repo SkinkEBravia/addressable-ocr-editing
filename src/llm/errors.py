@@ -15,7 +15,7 @@ __all__ = ["LLMError", "ConfigError", "CredentialError", "Failure", "LLM_KINDS"]
 
 # llm 阶段的失败类别。tool / extract 阶段的 kind 自由命名（见 09）。
 LLM_KINDS = (
-    "timeout",  # 超时 / 网络断连，重试耗尽后
+    "timeout",  # 超时 / 网络断连 / 流式停滞（看门狗掐流），重试耗尽后
     "rate_limit",  # HTTP 429
     "server",  # HTTP 5xx
     "auth",  # HTTP 401 / 403（不重试）

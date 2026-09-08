@@ -10,7 +10,15 @@ from ir import Block
 
 from view.types import AgentBlockId, AgentIdStrategy, Annotator
 
-__all__ = ["blockkey_as_is", "prefixed_blockkey", "xml_ish", "line_number", "cat_n"]
+__all__ = [
+    "blockkey_as_is",
+    "prefixed_blockkey",
+    "xml_ish",
+    "line_number",
+    "cat_n",
+    "numkey",
+    "plain",
+]
 
 
 def blockkey_as_is(block: Block, index: int) -> AgentBlockId:
@@ -58,3 +66,22 @@ def cat_n(agent_id: AgentBlockId, content: str) -> str:
     """
     text = f"{agent_id}: {content}"
     return text if text.endswith("\n") else text + "\n"
+
+
+def numkey(block: Block, index: int) -> AgentBlockId:
+    """id 策略 ``numkey``：AgentBlockId = BlockKey 的序号部分（``b12`` -> ``"12"``）。
+
+    BlockKey 由分配器取号（``bN``）且核心操作不变更既有块的 key，因此
+    num-key 是**稳定标识而非行号**：编辑后不重排（与位置性的
+    ``line_number`` 相对）。与 ``cat_n`` 配套构成 num-key 锚操作面。
+    """
+    return str(int(block.key[1:]))
+
+
+def plain(agent_id: AgentBlockId, content: str) -> str:
+    """标注形式 ``plain``：恒等——忽略 id，原样返回块内容。
+
+    全量 payload = 各块内容直接拼接 ≡ 原文（无损）。
+    用于「path 抬头 + 纯原文」视图（``present_file`` 的 annotator 参数）。
+    """
+    return content

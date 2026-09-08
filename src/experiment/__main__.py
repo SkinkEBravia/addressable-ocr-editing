@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -132,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.instruction:
         instruction = Path(args.instruction).read_text(encoding="utf-8")
 
+    _setup_run_log(out)
+
     client = None
     if any(build_toolset(c).uses_llm for c in toolset_configs):
         client = build_client(model_config)
@@ -204,6 +207,25 @@ def _emit_report(args, out: Path, model_config=None, toolset_configs=None, instr
         report["replay"] = old["replay"]  # 报告重建不丢 replay 段
     path = write_report(report, out)
     print(f"report: {path}")
+
+
+def _setup_run_log(out: Path) -> None:
+    """把 "llm" / "agent" logger 落到 <out>/logs/run.log（追加；不进控制台）。
+
+    记录：LLM 侧每次重试 / 停滞掐流 / 流式 attempt 始末（llm.transport、
+    llm.stream），agent 侧每轮解析出的调用数与大批量调用的执行进度
+    （agent.loop）。排查「跑着跑着没 token / 卡住」先翻这个文件。
+    """
+    log_dir = out / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_dir / "run.log", encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    for name in ("llm", "agent"):
+        pkg_logger = logging.getLogger(name)
+        pkg_logger.setLevel(logging.INFO)
+        pkg_logger.addHandler(handler)
 
 
 if __name__ == "__main__":

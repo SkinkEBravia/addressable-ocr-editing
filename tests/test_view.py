@@ -20,8 +20,12 @@ from view import (
     ReferenceMap,
     ViewError,
     blockkey_as_is,
+    cat_n,
+    numkey,
+    plain,
     prefixed_blockkey,
     present,
+    present_file,
     render_blocks,
     xml_ish,
 )
@@ -174,3 +178,31 @@ class TestPrefixedAndFileView:
         assert '<x id="c0:b1"\\>' in view.payload
         assert view.reference_map["c0:b1"] == "b1"
         assert view.reference_map.agent_id_of("b1") == "c0:b1"
+
+
+class TestNumkeyAndPlain:
+    """num-key 锚操作面的两个组件（plan/neo_experiment.md 实验2）。"""
+
+    def test_numkey_strips_blockkey_prefix(self) -> None:
+        block = Block(key="b12", content="x", attrs={})
+        assert numkey(block, 0) == "12"
+        assert numkey(block, 7) == "12"  # 与下标无关：稳定 id，非位置性行号
+
+    def test_numkey_view_with_cat_n(self) -> None:
+        snapshot = _snapshot("ab\ncd\n", size=3)  # b1="ab\n", b2="cd\n"
+        view = present(snapshot, numkey, cat_n)
+        assert view.payload == "1: ab\n2: cd\n"
+        assert view.reference_map["2"] == "b2"
+
+    def test_plain_identity(self) -> None:
+        assert plain("b1", "原文\n") == "原文\n"
+
+    def test_present_file_with_explicit_strategy_and_label(self) -> None:
+        snapshot = _snapshot("ab\ncd\n", size=3)
+        view = present_file(
+            snapshot, "text", annotator=plain, strategy=numkey, label="Text"
+        )
+        # plain 恒等：payload = 抬头 + 原文（无损）
+        assert view.payload == "--- [Text: text] ---\nab\ncd\n"
+        assert view.render_spec["label"] == "Text"
+        assert view.reference_map["1"] == "b1"

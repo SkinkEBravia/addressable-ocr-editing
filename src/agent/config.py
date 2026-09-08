@@ -10,6 +10,14 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.numkey import (
+    FindReplaceBlockedToolSet,
+    FindReplaceNumkeyToolSet,
+    PatchFindReplaceNoattToolSet,
+    PatchFindReplaceToolSet,
+    PatchFindReplaceUnstableToolSet,
+    RewriteNumkeyToolSet,
+)
 from agent.patch import PatchToolSet
 from agent.sequential import (
     FindReplaceGlobalSeqToolSet,
@@ -20,7 +28,13 @@ from agent.sequential import (
     SweEditGlobalSeqToolSet,
     SweEditSeqToolSet,
 )
-from agent.standard import FindReplaceToolSet, NoopToolSet, RewriteToolSet
+from agent.standard import (
+    FindReplaceAnthropicToolSet,
+    FindReplaceToolSet,
+    NoopToolSet,
+    RewriteAnthropicToolSet,
+    RewriteToolSet,
+)
 from agent.swe_bash import SweBashToolSet
 from agent.swe_edit import SweEditToolSet
 from agent.toolset import Budget, ToolSet
@@ -51,6 +65,15 @@ REGISTRY: dict[str, type] = {
     "patch_global_seq": PatchGlobalSeqToolSet,
     "swe_edit_global_seq": SweEditGlobalSeqToolSet,
     "find_replace_global_seq": FindReplaceGlobalSeqToolSet,
+    # ---- neo 实验臂（plan/neo_experiment.md）：path 抬头 / num-key 视图 ----
+    "rewrite_anthropic_style": RewriteAnthropicToolSet,
+    "find_replace_anthropic_style": FindReplaceAnthropicToolSet,
+    "rewrite_numkey": RewriteNumkeyToolSet,
+    "find_replace_numkey": FindReplaceNumkeyToolSet,
+    "find_replace_blocked": FindReplaceBlockedToolSet,  # = find_replace_numkey + 注意力条款
+    "patch_find_replace": PatchFindReplaceToolSet,  # 仅块内 find_replace，parse 层强制
+    "patch_find_replace_noatt": PatchFindReplaceNoattToolSet,  # 同上，无注意力条款
+    "patch_find_replace_unstable": PatchFindReplaceUnstableToolSet,  # 位置性行号 key
     # ---- 历史包袱：旧命名保留为别名，**勿用于新实验** ----
     # 工具集名进入 resume 键、磁带路径与 report 的 arm 键，删除会使既有 run
     # 无法 resume / replay / report-only。仅为读回历史 run 保留。

@@ -78,12 +78,16 @@ class ProgressReporter(Protocol):
     def end_cell(self, label: str, session: Session,
                  elapsed_s: float) -> None: ...     # 终态（含 failed:<kind>）
     def close(self) -> None: ...                    # 运行结束（含 Ctrl+C），释放终端资源
+    # 可选能力（实现了才会被喂）：
+    def delta(self, text: str) -> None: ...         # 流式增量订阅（见下）
+    def activity(self, text: str) -> None: ...      # 阶段活动行（见下）
 ```
 
 - 全部为观察回调，不得影响实验语义；监控输出不进磁带、不进报告。
-- 内建 `RichProgress`（rich.Live）：TTY 原地刷新状态行（进度 `done/total`、当前 cell、轮次、墙钟、out token、**TPS**）+ 最近事件行；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI；`NullProgress` 为全空缺省。
+- 内建 `RichProgress`（rich.Live）：TTY 原地刷新状态行（进度 `done/total`、当前 cell、轮次、墙钟、out token、**TPS**）+ 活动行 + 最近事件行；非 TTY（重定向 / CI）退化为追加事件行，不喷 ANSI；`NullProgress` 为全空缺省。
 - token 计数只认端点 usage（经 Session 派生）；报告中的 usage/TPS 以落盘的端点值为准。
 - **流式 TPS**：流式开关是显式运行参数（`--no-stream` 关闭），与报告器无关；报告器声明 `delta(text)` 则 loop 把增量喂给它（有流式开关且有订阅者才流式）。TPS 为时间窗滚动估值（窗内增量字符 ÷ 4，标 `~`，窗长 15s），窗内无增量时改显停滞秒数——慢生成与挂起可区分。**只计数不预览**：模型输出文本不进终端。**并发口径**：状态行是全局吞吐——增量窗跨 cell 共享（start_cell 不得清零），out tok 按 cell 累计求和，另显活跃 cell 数；per-cell 的轮次/墙钟在事件行与磁带里，状态行不承担。
+- **活动行**：报告器声明 `activity(text)` 则 loop 经 run 层喂入阶段信号（`<task> × <toolset> | 第 N 轮：LLM 请求中 / 执行 i/M 条调用 / 收尾`），多 cell 共享一行、后写覆盖。增量停更时它区分「流停滞」（看 `run.log` 的 stall/重试）与「本地逐条执行大批量调用」（活动行在走 i/M）。
 
 ### 并发
 
