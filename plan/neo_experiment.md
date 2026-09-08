@@ -28,11 +28,11 @@
 
 ### 三个工具
 
-| 工具 | 签名 | `old` 的唯一性范围 |
-|---|---|---|
-| `find_replace` | `find_replace(path, "old", "new")` | 整个 path |
-| `patch_find_replace` | `find_replace(path, key, "old", "new")` | **该 num-key 的块内** |
-| `swe_edit` | `edit(path, start, end, "text")` | 无字符串匹配，直接按行号换整段 |
+| 工具                   | 签名                                      | `old` 的唯一性范围           |
+| ---------------------- | ----------------------------------------- | ------------------------------ |
+| `find_replace`       | `find_replace(path, "old", "new")`      | 整个 path                      |
+| `patch_find_replace` | `find_replace(path, key, "old", "new")` | **该 num-key 的块内**    |
+| `swe_edit`           | `edit(path, start, end, "text")`        | 无字符串匹配，直接按行号换整段 |
 
 `find_replace` 两个变体的唯一差别是**搜索范围**：全 path vs 单块。
 其余（逐字复制、不唯一则拒绝执行并回报、JSON 字符串）完全相同。
@@ -40,7 +40,6 @@
 `find_replace` 对齐 Anthropic `str_replace`（`old_str` 必须唯一，不唯一拒绝执行）。
 `swe_edit` 对齐 SWE-agent classic 的行号锚 —— 它的行号**是**位置性的、会漂移，
 这是该臂的固有性质，不修正。
-
 
 ## 实验1：探究输出阶段完整遍历注意力窗口与聚焦发现的错误的差异
 
@@ -90,17 +89,23 @@ view: 纯原文
 | `rewrite` 的最坏一篇更糟（max 相对中位数拉得更开）                              | 最坏情况相当，或反过来 |
 | 噪声越高，`rewrite` 越容易因为输出太长被截断                                    | 截断率和噪声无关       |
 
+### 实验组
+
+doc level, rewrite, 1 doc per session, 1 shot
+
+doc level, find_replace, 1 doc per session, 1 shot
+
 ### Coding Plan（简要）
 
 新建，不改既有实现（旧臂要留给既有 run 读回）。
 
-| # | 做什么 | 落点 |
-|---|---|---|
-| 1 | **path 抬头的 view**：`--- [Text: {name}] ---` + 原文 | `src/view/present.py::present_file`（`prefix=None`、`annotator` 恒等） |
+| # | 做什么                                                                                                                       | 落点                                                                              |
+| - | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1 | **path 抬头的 view**：`--- [Text: {name}] ---` + 原文                                                                | `src/view/present.py::present_file`（`prefix=None`、`annotator` 恒等）      |
 | 2 | **`find_replace_anthropic_style`**：`find_replace(path, "old", "new")`，`count(old)` 不等于 1 即拒绝并回报冲突数 | `src/agent/standard.py`，照 `FindReplaceToolSet` 复制一份改 `_find_replace` |
-| 3 | **`rewrite_anthropic_style`**：仅把输入换成带 path 抬头的 view，输出仍是纯文本 | 同上 |
-| 4 | 注册 + 两个 toml | `src/agent/config.py`、`configs/toolsets/` |
-| 5 | 测试：唯一→成功、零匹配→拒绝、多匹配→拒绝且不改动 | `tests/test_agent.py` |
+| 3 | **`rewrite_anthropic_style`**：仅把输入换成带 path 抬头的 view，输出仍是纯文本                                       | 同上                                                                              |
+| 4 | 注册 + 两个 toml                                                                                                             | `src/agent/config.py`、`configs/toolsets/`                                    |
+| 5 | 测试：唯一→成功、零匹配→拒绝、多匹配→拒绝且不改动                                                                         | `tests/test_agent.py`                                                           |
 
 第 2 项现有实现只差一个分支：
 
@@ -113,6 +118,29 @@ if count > 1:   return ToolResult(False, f"Found {count} matches for {old!r}. Pl
 **先翻已有 dta19 数据** —— `rewrite` 与 `find_replace` 当时都拿纯原文，本就公平。
 只有确认要统一新 system 前缀时才跑新臂。
 
+#### 实现落账（2026-09-06，已跑通测试）
+
+| # | 落点（实际）                                                                                                                                                          | 状态 |
+| - | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1 | path 抬头：`view.file_header("Text", "text")`（`src/view/present.py`，单处定义）；text-based 臂直接拼抬头，恒等 annotator `plain` 备在 `src/view/defaults.py` | ✅   |
+| 2 | `FindReplaceAnthropicToolSet`（注册键 `find_replace_anthropic_style`），`src/agent/standard.py`；0 匹配 / 多匹配均拒绝且不改动                                  | ✅   |
+| 3 | `RewriteAnthropicToolSet`（注册键 `rewrite_anthropic_style`），同上文件，只换 `present_input`                                                                   | ✅   |
+| 4 | `src/agent/config.py` + `configs/toolsets/{rewrite,find_replace}_anthropic_style.toml`                                                                            | ✅   |
+| 5 | `tests/test_agent.py`：唯一→成功、零匹配→拒绝、多匹配→拒绝且不改动、未知 path→拒绝                                                                              | ✅   |
+
+偏差：抬头措辞为 `--- [Text: text] ---`（`present_file` 抬头加了 `label` 参数承载 `Text`，
+默认 `File` 不变，全局 seq 臂口径不受影响）；单文档场景的 path 名固定为 `text`
+（`standard.PATH_NAME`），跨轮稳定。
+
+实验组口径更新（2026-09-06）：全部 **1-shot**——所有臂 `max_turns=1`，
+prompt_clause 末尾逐字追加一次性告知（`standard.ONE_SHOT_NOTICE_*`：
+rewrite 臂用 `_REWRITE` 版，工具臂用 `_TOOLS` 版，要求一口气给出全部调用
+并以 `done()` 收尾）。
+
+实验文档（一个单元一个文档，模板：`Docs/Experiments/units/_template.md`）：`Docs/Experiments/units/`
+
+- `dta19-doc-1shot-rewrite.md`（rewrite_anthropic_style）
+- `dta19-doc-1shot-find-replace.md`（find_replace_anthropic_style）
 
 ## 实验2：探究锚对结果的影响 + 按锚点聚焦的影响
 
@@ -129,20 +157,24 @@ if count > 1:   return ToolResult(False, f"Found {count} matches for {old!r}. Pl
 
 **要回答的问题**：给原文打上 num-key 有什么用？分三种用法，一层层加。
 
-| 臂 | 输入带 key | 提示词要求先按块想 | 改的时候用 key 定位 |
-|---|---|---|---|
-| `rewrite` | ✅ | — | — |
-| `find_replace` | ✅ | — | — |
-| `find_replace_blocked` | ✅ | ✅ | — |
-| `patch_find_replace` | ✅ | ✅ | ✅ |
+| 臂                       | 输入带 key | 提示词要求先按块想 | 改的时候用 key 定位 |
+| ------------------------ | ---------- | ------------------ | ------------------- |
+| `rewrite`              | ✅         | —                 | —                  |
+| `find_replace`         | ✅         | —                 | —                  |
+| `find_replace_blocked` | ✅         | ✅                 | —                  |
+| `patch_find_replace`   | ✅         | ✅                 | ✅                  |
+| `patch_find_replace_noatt` | ✅     | —                 | ✅                  |
+| `patch_find_replace_unstable` | ✅（位置性） | ✅           | ✅（key 编辑后重排） |
 
 **每一档只比上一档多一样东西**，所以每两档之间的差就是那一样东西的效果：
 
-| 比什么 | 得到什么 |
-|---|---|
-| 实验1 的 `find_replace` ↔ 实验2 的 `find_replace` | key **光是看得见**（用不上）有没有影响 |
-| `find_replace` ↔ `find_replace_blocked` | **提示词让它按块想**有没有影响 |
-| `find_replace_blocked` ↔ `patch_find_replace` | **真的拿 key 去定位**有没有影响 |
+| 比什么                                                | 得到什么                                    |
+| ----------------------------------------------------- | ------------------------------------------- |
+| 实验1 的`find_replace` ↔ 实验2 的 `find_replace` | key**光是看得见**（用不上）有没有影响 |
+| `find_replace` ↔ `find_replace_blocked`          | **提示词让它按块想**有没有影响        |
+| `find_replace_blocked` ↔ `patch_find_replace`    | **真的拿 key 去定位**有没有影响       |
+| `patch_find_replace` ↔ `patch_find_replace_noatt` | **注意力条款**有没有影响（补上 2×2 第四格） |
+| `patch_find_replace` ↔ `patch_find_replace_unstable` | key **稳定性**有没有影响（外观相同，行号编辑后重排） |
 
 第一条尤其要紧：如果 key 光是出现在输入里就改变了结果，那上一批实验里
 「带标记的臂 vs 不带标记的臂」全部不可比，得重做。
@@ -162,27 +194,42 @@ if count > 1:   return ToolResult(False, f"Found {count} matches for {old!r}. Pl
 
 **跑之前先写下预期**
 
-| 预期 | 什么结果算预期落空 |
-|---|---|
-| key 光看得见不影响 `find_replace`（和实验1 同臂结果一致） | 有明显差异 ⇒ 上一批的跨臂比较要全部重做 |
-| 要求按块想会让它改得更少：改坏减少，修对也减少 | 两者同方向变化 |
-| 真的用 key 定位后，**每次操作波及的范围变小** | 不变或变大 |
-| `rewrite` 的 key 泄漏率高于其他臂 | 各臂泄漏率相当 |
+| 预期                                                       | 什么结果算预期落空                       |
+| ---------------------------------------------------------- | ---------------------------------------- |
+| key 光看得见不影响`find_replace`（和实验1 同臂结果一致） | 有明显差异 ⇒ 上一批的跨臂比较要全部重做 |
+| 要求按块想会让它改得更少：改坏减少，修对也减少             | 两者同方向变化                           |
+| 真的用 key 定位后，**每次操作波及的范围变小**        | 不变或变大                               |
+| `rewrite` 的 key 泄漏率高于其他臂                        | 各臂泄漏率相当                           |
+
+### 实验组
+
+doc level, rewrite, 1 doc per session, 1shot
+
+doc level, find_replace, 1 doc per session, 1shot
+
+doc level, patch_replace, 1 doc per session, 1 shot
+
+doc level, find_replace with attention control, 1 doc per session, 1 shot
+
+doc level, patch_find_replace without attention control, 1 doc per session, 1 shot
+
+doc level, patch_find_replace with unstable keys, 1 doc per session, 1 shot（key = 真行号，
+每次编辑后按位置重排；外观与 patch_find_replace 完全相同，唯一变量 = 稳定性）
 
 ### Coding Plan（简要）
 
 依赖实验1 的第 1~2 项。
 
-| # | 做什么 | 落点 |
-|---|---|---|
-| 1 | **稳定 num-key 的 id 策略**：`AgentBlockId = int(BlockKey[1:])`。BlockKey 形如 `b12`，跨编辑不变 ⇒ key 天然稳定、不重排。**不要用 `line_number`**（位置性、会重排） | `src/view/defaults.py` 新增 `numkey` |
-| 2 | **annotator**：`f"{key}: {content}"`（沿用现有 `cat_n` 的形式，不要改成 `cat -n` 的制表符版） | 复用 `src/view/defaults.py::cat_n` |
-| 3 | **view**：path 抬头 + 上面两项 | `present_file(snapshot, name, annotator=cat_n)` + `numkey` 策略 |
-| 4 | **`patch_find_replace_anthropic_style`**：`find_replace(path, key, "old", "new")`，唯一性只在该块内判定 | `src/agent/patch.py` 旁新建，不改 `PatchToolSet` |
-| 5 | **parse 层拒绝**清单外操作（沿用已实现的 `allowed_ops`） | 同上 |
-| 6 | **`find_replace_blocked`** = 实验1 的 `find_replace_anthropic_style` + 注意力控制条款；工具行为完全不变 | 只加 `prompt_clause`，不新增工具逻辑 |
-| 7 | **key 泄漏指标**：产出里若出现 `^\d+: ` 形态的前缀即计数，**单列，不进 `broken`** | `datasets/hipe_2026/dataset.py` 的 `_score_unit` |
-| 8 | 注册 + 三个 toml + 测试 | `config.py` / `configs/toolsets/` / `tests/` |
+| # | 做什么                                                                                                                                                                                 | 落点                                                                |
+| - | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 1 | **稳定 num-key 的 id 策略**：`AgentBlockId = int(BlockKey[1:])`。BlockKey 形如 `b12`，跨编辑不变 ⇒ key 天然稳定、不重排。**不要用 `line_number`**（位置性、会重排） | `src/view/defaults.py` 新增 `numkey`                            |
+| 2 | **annotator**：`f"{key}: {content}"`（沿用现有 `cat_n` 的形式，不要改成 `cat -n` 的制表符版）                                                                              | 复用`src/view/defaults.py::cat_n`                                 |
+| 3 | **view**：path 抬头 + 上面两项                                                                                                                                                   | `present_file(snapshot, name, annotator=cat_n)` + `numkey` 策略 |
+| 4 | **`patch_find_replace_anthropic_style`**：`find_replace(path, key, "old", "new")`，唯一性只在该块内判定                                                                      | `src/agent/patch.py` 旁新建，不改 `PatchToolSet`                |
+| 5 | **parse 层拒绝**清单外操作（沿用已实现的 `allowed_ops`）                                                                                                                       | 同上                                                                |
+| 6 | **`find_replace_blocked`** = 实验1 的 `find_replace_anthropic_style` + 注意力控制条款；工具行为完全不变                                                                      | 只加`prompt_clause`，不新增工具逻辑                               |
+| 7 | **key 泄漏指标**：产出里若出现 `^\d+: ` 形态的前缀即计数，**单列，不进 `broken`**                                                                                      | `datasets/hipe_2026/dataset.py` 的 `_score_unit`                |
+| 8 | 注册 + 三个 toml + 测试                                                                                                                                                                | `config.py` / `configs/toolsets/` / `tests/`                  |
 
 **第 1 项是本实验成立的前提。** 用 `line_number` 会让模型必须预判自身编辑造成的位移 ——
 那是一个提示词没说、却必须做的隐藏计算，会把「按 key 定位」的效果和「会不会算位移」混在一起。
@@ -190,6 +237,44 @@ if count > 1:   return ToolResult(False, f"Found {count} matches for {old!r}. Pl
 **第 6 项要注意**：`find_replace` 与 `find_replace_blocked` 必须共用**同一个工具实现**，
 只有 `prompt_clause` 不同。否则这一对隔离的就不是提示词了。
 
+#### 实现落账（2026-09-06，已跑通测试）
+
+全部集中在**新模块 `src/agent/numkey.py`**（不改 `PatchToolSet` / `FindReplaceToolSet`），
+四臂全部 IR-backed（partition_lines + birth）——num-key 的稳定性由 BlockKey 不变更、
+不复用保证，而不是靠重 partition。
+
+| # | 落点（实际）                                                                                                                                                                                               | 状态 |
+| - | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 1 | `numkey` 策略：`src/view/defaults.py::numkey`（`b12` → `"12"`）                                                                                                                                   | ✅   |
+| 2 | annotator 复用`cat_n`                                                                                                                                                                                    | ✅   |
+| 3 | view：`present_file(..., strategy=numkey, annotator=cat_n, label="Text")`（`present_file` 新增可选 `strategy` 参数，向后兼容）                                                                       | ✅   |
+| 4 | `PatchFindReplaceToolSet`（注册键 `patch_find_replace`，不带 `_anthropic_style` 后缀）：块内唯一匹配，编辑后回显被改块（key 不变）                                                                   | ✅   |
+| 5 | parse 层拒绝：方言只认`read` / `find_replace` / `done`，清单外操作 ToolParseError（与 `allowed_ops` 同强度，同层拦截）                                                                             | ✅   |
+| 6 | `FindReplaceBlockedToolSet` 继承 `FindReplaceNumkeyToolSet`，**同一实现**，仅 `prompt_clause` 多 `ATTENTION_CLAUSE`；注意两臂都建立在 num-key 视图之上（实验2 的输入），不是实验1 的纯原文臂 | ✅   |
+| 7 | `key_leak` 指标：`datasets/hipe_2026/dataset.py::_score_unit`，作用于未归一化产出（官方 norm 会抹掉信号），单列不进 broken                                                                             | ✅   |
+| 8 | 注册 +`configs/toolsets/{rewrite_numkey,find_replace_numkey,find_replace_blocked,patch_find_replace}.toml` + 测试（含 key 稳定、块内唯一性、跨块替换、parse 拒绝）                                       | ✅   |
+| 9 | `PatchFindReplaceNoattToolSet`（注册键 `patch_find_replace_noatt`）：继承 `PatchFindReplaceToolSet`，**同一实现**，仅 `prompt_clause` 去掉 ATTENTION_CLAUSE；与 find_replace_numkey / patch_find_replace 凑成「注意力 × 用key定位」2×2 | ✅   |
+| 10 | `PatchFindReplaceUnstableToolSet`（注册键 `patch_find_replace_unstable`）：同上继承，`_STRATEGY = view_mod.line_number`、`_KEY_NOUN = "line"`，`_after_edit` 钩子在每次编辑后全文重新 partition + re-birth ⇒ 编号按位置重排；提示词用 `LINE_NUMBER_VIEW_CLAUSE` + `PATCH_FIND_REPLACE_LINES_CLAUSE`（如实披露位置性/漂移），ATTENTION_CLAUSE 不变 | ✅   |
+
+偏差：num-key 臂的 `read()` 返回**带 num-key 的当前文本**（不含 path 抬头），
+条款相应改为 `with its num-keys`——由 `FIND_REPLACE_ANTHROPIC_CLAUSE` 单源 `.replace`
+派生（`FIND_REPLACE_NUMKEY_CLAUSE`），防止两份条款漂移；下方 appendix 的
+find_replace tool prompt 是实验1 的原样，实验2 两臂的差异仅这一行。
+追加臂的偏差：unstable 臂的 key 未知报错措辞为 "no block/line numbered {key}"
+（按 `_KEY_NOUN` 变化）；`_STRATEGY` 以 `staticmethod` 包裹（函数作类属性会被绑定成方法）。
+
+1-shot 口径同实验1：四臂 `max_turns=1`，prompt_clause 末尾追加
+`ONE_SHOT_NOTICE_*`（blocked / patch_find_replace 的顺序是
+…→ 注意力控制条款 → 1-shot 告知，告知永远在最后）。
+
+实验文档（一个单元一个文档）：`Docs/Experiments/units/`
+
+- `dta19-doc-1shot-rewrite-numkey.md`（rewrite_numkey）
+- `dta19-doc-1shot-find-replace-numkey.md`（find_replace_numkey）
+- `dta19-doc-1shot-find-replace-blocked.md`（find_replace_blocked）
+- `dta19-doc-1shot-patch-find-replace.md`（patch_find_replace）
+- `dta19-doc-1shot-patch-find-replace-noatt.md`（patch_find_replace_noatt）
+- `dta19-doc-1shot-patch-find-replace-unstable.md`（patch_find_replace_unstable）
 
 ## 实验3：探究不同锚对结果的影响
 
@@ -241,7 +326,6 @@ you saw. The keys are not part of the text; never include them in what you outpu
 
 实验1 无 key，此段留空。
 
-
 ### find_replace tool prompt
 
 对齐 Anthropic `str_replace` 的唯一性语义。改完同步 `src/agent/standard.py`。
@@ -254,7 +338,6 @@ You edit the text with tool calls, one function call per line:
 
 Strings use JSON syntax. Output ONLY the calls. No explanation, no preamble, no markdown fences. If no correction is needed, output done() immediately.
 ```
-
 
 ### patch_find_replace tool prompt
 
@@ -272,7 +355,6 @@ Strings use JSON syntax. Output ONLY the calls. No explanation, no preamble, no 
 
 > 与 `find_replace` 逐行对照，只有两处不同：`read()` 的返回带 num-key；
 > `find_replace` 多了 `key` 参数，唯一性范围随之收窄到该块。
-
 
 ### 注意力控制提示词
 
