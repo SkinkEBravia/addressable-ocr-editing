@@ -42,6 +42,8 @@ def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
         raise ConfigError("anthropic 协议必须显式 output_length（作为 max_tokens 下发）")
     if config.reasoning_effort is not None:
         raise ConfigError("anthropic 适配器 v1 不支持 reasoning_effort（不下发、不静默忽略）")
+    if config.extra_body is not None:
+        raise ConfigError("anthropic 适配器不支持 extra_body（不静默忽略）")
     system = "\n\n".join(m.content for m in messages if m.role == "system")
     payload: dict = {
         "model": config.model,

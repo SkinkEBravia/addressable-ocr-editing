@@ -1,0 +1,11 @@
+# Grok 4.6 via Packy 中转（cf.api.fan，Responses 端点；该模型不支持 chat/completions，
+# 实测 protocol_not_supported）。e2e 实测：自带 instructions 时中转注入的默认 Codex
+# 提示词被整体替换，无泄漏；流式事件与 usage（含 reasoning_tokens）形状同
+# openai-response 适配器兼容。
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-response"
+base_url       = "https://cf.api.fan/v1"
+model          = "grok-4.6"
+key_env        = "PACKY_API_KEY"
+output_length  = 393216    # 384k（下发为 max_output_tokens；与 volc dta19 各单元逐字对齐）
+max_transport_retries = 8  # 中转稳定性未知，与 OpenRouter 批次同深度

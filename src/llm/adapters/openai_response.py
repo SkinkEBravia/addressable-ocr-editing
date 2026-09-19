@@ -53,7 +53,11 @@ def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
         input_items.append(
             {"role": m.role, "content": [{"type": part_type, "text": m.content}]}
         )
-    payload: dict = {"model": config.model, "input": input_items}
+    # extra_body 先并入（端点专属参数，如 OpenRouter 的 provider 路由）；
+    # 核心字段后写，extra_body 覆盖不了它们
+    payload: dict = dict(config.extra_body) if config.extra_body else {}
+    payload["model"] = config.model
+    payload["input"] = input_items
     if instructions:
         payload["instructions"] = instructions
     # 缺席 = 不下发；显式值才进线格式
@@ -229,6 +233,12 @@ class OpenAIResponseClient:
         status = str(data.get("status") or "completed")
         text = _text_from_output(data.get("output"))
         if not text:
+            # 端点级失败（status=failed/incomplete）：error 字段一并进 detail，
+            # 供失败审计（截断防爆；OpenRouter 的 error 含上游真实原因）
+            err = data.get("error")
+            if isinstance(err, dict):
+                err = {k: (str(v)[:300] if isinstance(v, str) else v)
+                       for k, v in err.items()}
             raise LLMError(
                 Failure(
                     stage="llm",
@@ -238,6 +248,7 @@ class OpenAIResponseClient:
                     detail={
                         "response_status": status,
                         "incomplete_details": data.get("incomplete_details"),
+                        "error": err,
                     },
                 )
             )

@@ -19,6 +19,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+if sys.stdout.encoding != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except AttributeError:
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 UNITS = ROOT / "Docs" / "Experiments" / "units"
 
@@ -66,6 +72,11 @@ def build_table(report: dict) -> str:
 
 def fill(unit: str) -> str:
     doc = UNITS / f"{unit}.md"
+    if not doc.exists():
+        # 单元文档可能在批次子文件夹里（Volc-DSv4_1/ 等）
+        matches = sorted(UNITS.glob(f"*/{unit}.md"))
+        if matches:
+            doc = matches[0]
     report_path = ROOT / "runs" / unit / "report.json"
     if not doc.exists():
         return f"跳过 {unit}：无文档"

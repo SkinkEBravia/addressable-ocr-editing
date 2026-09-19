@@ -43,6 +43,7 @@ _KNOWN_KEYS = frozenset(
         "output_length",
         "max_transport_retries",
         "timeout",
+        "extra_body",
     }
 )
 
@@ -62,6 +63,7 @@ class ModelConfig:
     output_length: int | None = None  # 信息性，暂不使用
     max_transport_retries: int = 3
     timeout: float = 600.0
+    extra_body: dict | None = None  # 端点专属参数，原样并入请求体顶层
 
     def as_dict(self) -> dict:
         """序列化为配置字典（report.json 落盘 / 重建用）。"""
@@ -76,6 +78,7 @@ class ModelConfig:
             "output_length": self.output_length,
             "max_transport_retries": self.max_transport_retries,
             "timeout": self.timeout,
+            "extra_body": self.extra_body,
         }
 
 
@@ -120,7 +123,17 @@ def model_config_from_dict(name: str, d: dict) -> ModelConfig:
         ),
         max_transport_retries=int(d.get("max_transport_retries", 3)),
         timeout=float(d.get("timeout", 600.0)),
+        extra_body=_parse_extra_body(name, d.get("extra_body")),
     )
+
+
+def _parse_extra_body(name: str, value: object) -> dict | None:
+    """extra_body 必须是 TOML 表（缺席 = None，不并入请求体）。"""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigError(f"模型配置 {name!r} 的 extra_body 必须是表（dict）")
+    return dict(value)
 
 
 def load_model_config(name: str, base_dir: Path | None = None) -> ModelConfig:

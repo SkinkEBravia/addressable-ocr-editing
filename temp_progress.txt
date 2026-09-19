@@ -1,0 +1,56 @@
+# 改动清单与目的（neo 实验一轮）
+
+## 1. 新实验臂（plan/neo_experiment.md 的实验组）
+- src/agent/numkey.py（新建）：numkey 四臂 find_replace_numkey / patch_find_replace /
+  patch_find_replace_noatt（去注意力控制）/ patch_find_replace_unstable（key 每次编辑后
+  按位置重排，外观与 patch_find_replace 完全相同，只稳定性不同）
+- src/agent/standard.py：anthropic_style 两臂（find_replace/rewrite），path 抬头纯原文
+  视图 + 对齐 Anthropic str_replace 唯一匹配语义；纯内存无 IR
+- src/agent/config.py：注册以上臂
+- configs/toolsets/（8 个新 toml）：find_replace_numkey / patch_find_replace /
+  patch_find_replace_noatt / patch_find_replace_unstable / find_replace_blocked /
+  find_replace_anthropic_style / rewrite_anthropic_style / rewrite_numkey
+- src/view/{__init__,defaults,present}.py：numkey id 策略（b12→"12"，稳定不重排）+
+  plain 标注器；present_file 增加 strategy/label 参数
+- datasets/hipe_2026/dataset.py：key_leak 指标（产出文本行首 num-key 泄漏的启发式
+  计数，单列、不进 broken）
+
+## 2. 卡住磁带的可观测性（针对 1.9M out tok / ~0 tok/s 问题）
+- src/llm/errors.py + adapters/openai_response.py：burst 错误映射进 rate_limit 重试通道
+- src/llm/adapters/_transport.py：iter_sse_data_lines 行级停滞看门狗（300s 无数据即断，
+  心跳不重置）
+- 三个适配器（openai_response/openai_completion/anthropic）：DeltaStallWatchdog
+  增量级看门狗；response.failed 优先于 stall 判定
+- src/experiment/__main__.py：<out>/logs/run.log（收 llm、agent 两个 logger）
+- src/agent/loop.py：agent.loop 日志（解析 N 条/每 50 条进度/parse error）+
+  on_activity 回调 + 轮末 flush 钩子（失败记 tool_persist）
+- src/experiment/progress.py + run.py：进度区第三行「活动：…」实时刷新（LLM 请求中 /
+  执行 i/N / 收尾），区分「流停滞」与「海量调用执行中」
+
+## 3. 磁盘写性能（消掉逐编辑 load/save 往返）
+- numkey 四臂 + swe_edit：轮内只推进内存快照，轮末 flush 一次性落盘
+  （快照粒度=轮，逐调用审计由磁带 calls/results 承担）
+- patch / sequential 不动：atomic 每次 run_patch 才一次 load+save，量级正常；
+  二者均不在当前 units，文档注明「用到再迁」
+
+## 4. 文档
+- plan/neo_experiment.md：实验组/落账/文档清单同步
+- Docs/Experiments/units/（新目录）：一个实验一文档 + unit 模板；
+  1-shot 实验提示词末尾追加「只有一次机会」
+- Docs/Design/06-view.md：numkey / plain 两行视图约定
+- Docs/Design/08-llm.md：timeout/rate_limit kind 表 + 可观测性节
+- Docs/Design/09-tools.md：工具契约 flush 条款 + Loop 规则 5/8
+- Docs/Design/11-experiment.md：报告器协议 + 活动行段
+
+## 5. 测试（366 passed, 1 skipped）
+- tests/test_agent.py：numkey 各臂、轮末 flush（一轮 2 编辑 ⇒ snapshots 恰 2 份）、
+  activity/loop 日志
+- tests/test_llm_adapters.py：burst 重试、DeltaStallWatchdog、SSE 看门狗、retry 日志
+- tests/test_view.py / test_hipe_dataset.py：numkey 视图、key_leak
+
+## 6. 运行残留清理（runs/，不入 git）
+- 删除卡住磁带：dta19-doc-1shot-find-replace-blocked 的 l1/l2 poersch 两篇；
+  find-replace-numkey run 3 条非终态；patch-find-replace-noatt run 7 条非终态，
+  及对应 work 目录（重跑用）
+
+注：plan/neo_experiment copy.md 非本次改动（疑似手动副本，未动）。

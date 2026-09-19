@@ -1,0 +1,17 @@
+# GLM 5.3 Flash via OpenRouter（Responses 端点；优先协议——见 Docs/Design/08-llm.md；
+# 官方说明见 Docs/Openrouter_response.md）。provider 路由锁 modal/fp8（fp8 量化变体，
+# 端点实测 max_completion_tokens=943718）。
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-response"
+base_url       = "https://openrouter.ai/api/v1"
+model          = "z-ai/glm-5.3-flash"
+key_env        = "OPENROUTER_API_KEY"
+context_window = 1048576   # 1024k（信息性，暂不使用）
+output_length  = 393216    # 384k（下发为 max_output_tokens；与 volc dta19 各单元预算对齐，
+                           # 消除 glm-5.3-flash.toml 批次已知的输出预算混淆项）
+max_transport_retries = 8  # OpenRouter 共享池上游限流（429）较频繁，加深重试通道
+
+# OpenRouter provider 路由：只走 modal/fp8，不允许回退到别家
+#（回退会混量化变体与计费口径，破坏跨单元可比性）。
+[extra_body.provider]
+only = ["modal/fp8"]

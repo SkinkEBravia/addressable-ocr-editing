@@ -41,6 +41,21 @@ def test_unknown_protocol_rejected():
         model_config_from_dict("m", {**_minimal(), "protocol": "openapi"})
 
 
+def test_extra_body_parsed_and_serialized():
+    cfg = model_config_from_dict(
+        "m", {**_minimal(), "extra_body": {"provider": {"only": ["modal/fp8"]}}}
+    )
+    assert cfg.extra_body == {"provider": {"only": ["modal/fp8"]}}
+    assert cfg.as_dict()["extra_body"] == {"provider": {"only": ["modal/fp8"]}}
+    # 缺席 = None（不并入请求体）
+    assert model_config_from_dict("m", _minimal()).extra_body is None
+
+
+def test_extra_body_must_be_table():
+    with pytest.raises(ConfigError, match="extra_body"):
+        model_config_from_dict("m", {**_minimal(), "extra_body": "modal/fp8"})
+
+
 def test_missing_required_key_rejected():
     d = _minimal()
     del d["key_env"]
@@ -97,6 +112,10 @@ def test_repo_model_configs_loadable():
         "glm-5.3-flash": "openai-response",
         "deepseek-v4-flash": "anthropic",
         "volc-deepseek-v4-flash": "openai-response",
+        "volc-deepseek-v4.1-flash": "openai-response",
+        "openrouter-glm-5.3-flash": "openai-response",
+        "openrouter-glm-5.3-flash-coreweave": "openai-response",
+        "openrouter-glm-5.3-flash-parasail": "openai-response",
     }
     for name, protocol in preferred.items():
         cfg = load_model_config(name)
@@ -105,3 +124,6 @@ def test_repo_model_configs_loadable():
     for name in ("glm-5.3-flash-completion", "deepseek-v4-flash-completion"):
         cfg = load_model_config(name)
         assert cfg.protocol == "openai-completion"  # 降级配置
+    # 中转端点：无 context_window 声明，只验证可装载与协议
+    cfg = load_model_config("packy-grok-4.6")
+    assert cfg.protocol == "openai-response"

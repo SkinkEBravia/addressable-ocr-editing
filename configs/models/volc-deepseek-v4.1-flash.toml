@@ -1,0 +1,11 @@
+# DeepSeek v4.1-flash via 火山引擎（Responses 端点；优先协议——见
+# Docs/Design/08-llm.md / Docs/LLM-providers.md）。与 volc-deepseek-v4-flash.toml
+# 的唯一差异是模型名（deepseek-v4-flash → deepseek-v4.1-flash），其余逐字相同：
+# 1024k 上下文（信息性）、384k 输出预算（显式下发为 max_output_tokens）。
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-response"
+base_url       = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model          = "deepseek-v4.1-flash"
+key_env        = "VOLCENGINE_API_KEY"
+context_window = 1048576   # 1024k（信息性，暂不使用）
+output_length  = 393216    # 384k（下发为 max_output_tokens；端点默认仅 ≈32k，不下发会被截断）

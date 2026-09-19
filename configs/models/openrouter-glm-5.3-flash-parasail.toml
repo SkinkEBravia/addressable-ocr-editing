@@ -1,0 +1,14 @@
+# GLM 5.3 Flash via OpenRouter，provider 锁 parasail/fp8（fp8 量化变体，
+# 端点标称 max_completion_tokens=943718）。与 openrouter-glm-5.3-flash.toml
+# 的唯一差异是 provider——控制变量口径见单元文档。
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "openai-response"
+base_url       = "https://openrouter.ai/api/v1"
+model          = "z-ai/glm-5.3-flash"
+key_env        = "OPENROUTER_API_KEY"
+context_window = 1048576
+output_length  = 393216    # 与 volc dta19 各单元逐字对齐
+max_transport_retries = 8
+
+[extra_body.provider]
+only = ["parasail/fp8"]

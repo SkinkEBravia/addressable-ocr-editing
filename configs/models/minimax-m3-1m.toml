@@ -1,0 +1,12 @@
+# MiniMax M3（1m 上下文变体）via MiniMax 官方 Anthropic 兼容端点。
+# 跨模型复现序列第五批：与 volc-deepseek-v4.1-flash.toml 声明性参数对齐——
+# 1024k 上下文（信息性）、384k 输出预算（anthropic 协议强制下发为 max_tokens）。
+# 端点为 anthropic 协议（POST {base_url}/v1/messages，x-api-key 鉴权），
+# 故 reasoning_effort / extra_body 不可配（适配器 ConfigError，见 08-llm.md）；
+# 采样参数留空 = 不下发，用端点默认。
+protocol       = "anthropic"
+base_url       = "https://api.minimax.cn/anthropic"
+model          = "MiniMax-M3[1m]"
+key_env        = "MINIMAX_API_KEY"
+context_window = 1048576   # 1024k（信息性，暂不使用）
+output_length  = 393216    # 384k（anthropic 协议强制下发为 max_tokens）

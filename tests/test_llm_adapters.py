@@ -484,3 +484,68 @@ def test_anthropic_wire_format():
     assert seen["body"]["max_tokens"] == 100
     assert seen["body"]["messages"] == [{"role": "user", "content": "hello"}]
     assert comp.text == "hi"
+
+
+# ---------------------------------------------------------------- extra_body
+
+
+def _completion_payload(text: str = "world") -> dict:
+    return {
+        "choices": [{"message": {"role": "assistant", "content": text}}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+    }
+
+
+def test_response_extra_body_passthrough():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.read())
+        return httpx.Response(200, json=_resp_payload())
+
+    client = OpenAIResponseClient(
+        make_config(
+            "openai-response",
+            extra_body={"provider": {"only": ["modal/fp8"]}},
+        ),
+        KEY,
+        http_client=mock_client(handler),
+    )
+    client.complete(MSGS)
+    assert seen["body"]["provider"] == {"only": ["modal/fp8"]}
+    # 核心字段不被 extra_body 覆盖
+    assert seen["body"]["model"] == "m1"
+
+
+def test_completion_extra_body_passthrough():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.read())
+        return httpx.Response(200, json=_completion_payload())
+
+    client = OpenAICompletionClient(
+        make_config(
+            "openai-completion",
+            extra_body={"provider": {"only": ["modal/fp8"]}},
+        ),
+        KEY,
+        http_client=mock_client(handler),
+    )
+    client.complete(MSGS)
+    assert seen["body"]["provider"] == {"only": ["modal/fp8"]}
+    assert seen["body"]["model"] == "m1"
+
+
+def test_anthropic_rejects_extra_body():
+    client = AnthropicClient(
+        make_config(
+            "anthropic",
+            output_length=100,
+            extra_body={"provider": {"only": ["modal/fp8"]}},
+        ),
+        KEY,
+        http_client=mock_client(lambda r: httpx.Response(200)),
+    )
+    with pytest.raises(ConfigError):
+        client.complete(MSGS)

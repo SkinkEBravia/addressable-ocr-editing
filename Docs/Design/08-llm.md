@@ -29,6 +29,12 @@ context_window  = 65536                 # 上下文窗口（信息性，暂不�
 output_length   = 8192                  # 输出长度上限；显式值下发为 max_output_tokens / max_tokens
 max_transport_retries = 3               # 重试通道上限
 timeout         = 600.0                 # 单次请求墙钟上限
+
+# 端点专属参数（可选 TOML 表）：原样并入请求体顶层，核心字段（model/messages/
+# input/采样键）后写、不可被它覆盖。用于 OpenRouter provider 路由等：
+# [extra_body.provider]
+# only = ["modal/fp8"]
+# anthropic 适配器不支持本键：配置即 ConfigError（不静默忽略）。
 ```
 
 规则：
@@ -37,6 +43,7 @@ timeout         = 600.0                 # 单次请求墙钟上限
 - **采样参数全部允许留空**：缺席时不下发该参数——许多模型在端点默认状态下性能最好。「缺席」与「显式值」在解析后的配置中可区分。
 - `context_window` 是声明性信息：供将来的历史管理与预算核算使用，不改变请求行为。
 - `output_length` 是采样键：显式值下发为 `max_output_tokens`（openai-response）/ `max_tokens`（openai-completion / anthropic）。**必须下发**——端点默认上限可能远低于模型能力（volc 实测默认 ≈32k，模型上限 384k），不下发则长输出任务被默认预算截断成 `incomplete`。anthropic 协议下为强制字段。
+- `extra_body` 是端点专属参数的透传口（如 OpenRouter 的 provider 路由）：并入请求体顶层，进入 `as_dict()` 序列化（即进 report.json 与 config_hash——同名配置改了 extra_body 视为新运行）；其内部内容不做校验，协议适配器不支持时报 ConfigError。
 - 采样参数属于模型配置：同一实验内各工具配置共用同一模型配置（公平性，见 [11](11-experiment.md#公平性)）。
 
 ### 凭证

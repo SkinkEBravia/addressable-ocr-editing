@@ -37,10 +37,11 @@ _REASONING_EFFORT_VALUES = ("low", "medium", "high")
 
 
 def _build_payload(config: ModelConfig, messages: list[Message]) -> dict:
-    payload: dict = {
-        "model": config.model,
-        "messages": [{"role": m.role, "content": m.content} for m in messages],
-    }
+    # extra_body 先并入（端点专属参数，如 OpenRouter 的 provider 路由）；
+    # 核心字段后写，extra_body 覆盖不了它们
+    payload: dict = dict(config.extra_body) if config.extra_body else {}
+    payload["model"] = config.model
+    payload["messages"] = [{"role": m.role, "content": m.content} for m in messages]
     # 缺席 = 不下发；显式值才进线格式
     if config.temperature is not None:
         payload["temperature"] = config.temperature
