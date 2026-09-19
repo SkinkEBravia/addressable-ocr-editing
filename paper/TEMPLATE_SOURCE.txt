@@ -1,0 +1,4 @@
+Template source cloned for this manuscript:
+https://github.com/kourgeorge/arxiv-style
+
+The manuscript keeps the upstream arxiv.sty layout and replaces the example content.
