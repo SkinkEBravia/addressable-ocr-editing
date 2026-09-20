@@ -151,6 +151,12 @@ From PowerShell, run the same script inside the container as one serial command
 docker run --rm --env-file .env -v "${PWD}:/app" bdpc-exp bash -lc 'cd /app && bash scripts/run_arxiv_response_replication.sh'
 ```
 
+The script first downloads the pinned HIPE-OCRepair-2026 `v0.9.5` release into
+`related_source/HIPE-OCRepair-2026-data-0.9.5` when that directory is absent.
+This dataset is not committed to this repository. A clean clone therefore
+needs this download step in addition to `uv sync` or `docker build`; the script
+is idempotent and never replaces an existing `data/v0.9` directory.
+
 The M3 config targets `https://api.minimax.cn/v1/responses` through the
 repository's `openai-response` adapter and reads `MINIMAX_API_KEY`. The two
 DeepSeek configs read `VOLCENGINE_API_KEY` and use their existing Responses

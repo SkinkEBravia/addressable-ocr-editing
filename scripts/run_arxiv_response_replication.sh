@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Run from /app in the container. Every output directory is new.
+uv run python scripts/fetch_hipe_data.py
+
 COMMON=(
   --dataset datasets/hipe_2026
   --toolsets noop,find_replace,find_replace_numkey,find_replace_blocked,patch_find_replace,patch_find_replace_noatt,patch_find_replace_unstable,rewrite,rewrite_numkey
