@@ -18,6 +18,8 @@ COMPARISONS = {
     "scope_noatt_v41": ("v41", "find-replace-numkey", "patch-find-replace-noatt"),
     "view_v41": ("v41", "find-replace", "find-replace-numkey"),
     "stability_v4": ("v4", "patch-find-replace", "patch-find-replace-unstable"),
+    "tail_v4": ("v4", "rewrite", "patch-find-replace"),
+    "tail_v41": ("v41", "rewrite", "patch-find-replace"),
 }
 
 
@@ -25,7 +27,7 @@ def load(path: Path):
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
-        for key in ("cmer", "fixed_rate", "edit_spans"):
+        for key in ("cmer", "fixed_rate", "broken_rate", "edit_spans"):
             row[key] = float(row[key])
     return rows
 
@@ -94,6 +96,7 @@ def main() -> int:
             "cmer": paired_cluster(rows, model, arm_a, arm_b, "cmer", args.resamples, args.seed),
             "p90": paired_cluster(rows, model, arm_a, arm_b, "p90", args.resamples, args.seed),
             "fixed_rate": paired_cluster(rows, model, arm_a, arm_b, "fixed_rate", args.resamples, args.seed),
+            "broken_rate": paired_cluster(rows, model, arm_a, arm_b, "broken_rate", args.resamples, args.seed),
             "edit_spans": paired_cluster(rows, model, arm_a, arm_b, "edit_spans", args.resamples, args.seed),
         }
     text = json.dumps(output, indent=2)

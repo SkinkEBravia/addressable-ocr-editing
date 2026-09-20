@@ -45,6 +45,21 @@
       "arm_b": "patch-find-replace",
       "estimand": "mean(B-A)"
     },
+    "broken_rate": {
+      "difference": 0.0014385932511938504,
+      "ci95": [
+        0.0004353583165717262,
+        0.0024820042873638913
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "find-replace-blocked",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
     "edit_spans": {
       "difference": 125.75757575757575,
       "ci95": [
@@ -97,6 +112,21 @@
       "ci95": [
         -0.03939930267342669,
         0.030096467785762245
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "find-replace-blocked",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "broken_rate": {
+      "difference": 0.00011168835560912231,
+      "ci95": [
+        -0.0008286317679894458,
+        0.0010814810398394581
       ],
       "n_tasks": 33,
       "n_source_documents": 11,
@@ -169,6 +199,21 @@
       "arm_b": "find-replace-numkey",
       "estimand": "mean(B-A)"
     },
+    "broken_rate": {
+      "difference": -0.0007728333457687395,
+      "ci95": [
+        -0.002043369092245838,
+        0.0004242634456202835
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "find-replace",
+      "arm_b": "find-replace-numkey",
+      "estimand": "mean(B-A)"
+    },
     "edit_spans": {
       "difference": -36.21212121212121,
       "ci95": [
@@ -221,6 +266,21 @@
       "ci95": [
         -0.14512890860156455,
         0.11062494569785467
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "find-replace-numkey",
+      "arm_b": "find-replace-blocked",
+      "estimand": "mean(B-A)"
+    },
+    "broken_rate": {
+      "difference": -7.017211185897229e-05,
+      "ci95": [
+        -0.0011343948867104422,
+        0.0011037820797554735
       ],
       "n_tasks": 33,
       "n_source_documents": 11,
@@ -293,6 +353,21 @@
       "arm_b": "patch-find-replace-noatt",
       "estimand": "mean(B-A)"
     },
+    "broken_rate": {
+      "difference": 0.0008869855848629558,
+      "ci95": [
+        -0.00028546823790235205,
+        0.0020483765420903147
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "find-replace-numkey",
+      "arm_b": "patch-find-replace-noatt",
+      "estimand": "mean(B-A)"
+    },
     "edit_spans": {
       "difference": 99.48484848484848,
       "ci95": [
@@ -345,6 +420,21 @@
       "ci95": [
         -0.015272921916051634,
         0.08290830702183838
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "find-replace-numkey",
+      "arm_b": "patch-find-replace-noatt",
+      "estimand": "mean(B-A)"
+    },
+    "broken_rate": {
+      "difference": -0.0007759888589864758,
+      "ci95": [
+        -0.0023200353553513506,
+        0.0004275088040009641
       ],
       "n_tasks": 33,
       "n_source_documents": 11,
@@ -417,6 +507,21 @@
       "arm_b": "find-replace-numkey",
       "estimand": "mean(B-A)"
     },
+    "broken_rate": {
+      "difference": 0.0004888940068565056,
+      "ci95": [
+        -0.000993159077978602,
+        0.0025647368775746594
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "find-replace",
+      "arm_b": "find-replace-numkey",
+      "estimand": "mean(B-A)"
+    },
     "edit_spans": {
       "difference": 16.78787878787879,
       "ci95": [
@@ -479,6 +584,21 @@
       "arm_b": "patch-find-replace-unstable",
       "estimand": "mean(B-A)"
     },
+    "broken_rate": {
+      "difference": -0.0006350410858357398,
+      "ci95": [
+        -0.0014824956639848082,
+        0.00014184493081102675
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "patch-find-replace",
+      "arm_b": "patch-find-replace-unstable",
+      "estimand": "mean(B-A)"
+    },
     "edit_spans": {
       "difference": -47.21212121212121,
       "ci95": [
@@ -492,6 +612,160 @@
       "model": "v4",
       "arm_a": "patch-find-replace",
       "arm_b": "patch-find-replace-unstable",
+      "estimand": "mean(B-A)"
+    }
+  },
+  "tail_v4": {
+    "cmer": {
+      "difference": -0.03276687732959992,
+      "ci95": [
+        -0.09220222147629724,
+        -0.0018348775761710839
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "p90": {
+      "difference": -0.019019471876201968,
+      "ci95": [
+        -0.02709764050147582,
+        -0.0025159968915600926
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "P90(B)-P90(A)"
+    },
+    "fixed_rate": {
+      "difference": -0.016185914435525167,
+      "ci95": [
+        -0.06345136951755048,
+        0.05713866444168697
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "broken_rate": {
+      "difference": -0.03341436333466587,
+      "ci95": [
+        -0.09111657426704167,
+        -0.0030668190525509832
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "edit_spans": {
+      "difference": 6.696969696969697,
+      "ci95": [
+        -43.57575757575758,
+        88.84848484848484
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v4",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    }
+  },
+  "tail_v41": {
+    "cmer": {
+      "difference": -0.002874515627427287,
+      "ci95": [
+        -0.006142374056355069,
+        -0.0002588939921428882
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "p90": {
+      "difference": -0.005864209647455078,
+      "ci95": [
+        -0.01857646051834404,
+        0.0036342246006624453
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "P90(B)-P90(A)"
+    },
+    "fixed_rate": {
+      "difference": -0.04714581033807649,
+      "ci95": [
+        -0.11123583276112098,
+        0.025891469557992878
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "broken_rate": {
+      "difference": -0.002813384519735993,
+      "ci95": [
+        -0.005609408947448096,
+        -0.0005595352205220125
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
+      "estimand": "mean(B-A)"
+    },
+    "edit_spans": {
+      "difference": 33.27272727272727,
+      "ci95": [
+        -42.18181818181818,
+        164.42424242424244
+      ],
+      "n_tasks": 33,
+      "n_source_documents": 11,
+      "resamples": 20000,
+      "seed": 0,
+      "model": "v41",
+      "arm_a": "rewrite",
+      "arm_b": "patch-find-replace",
       "estimand": "mean(B-A)"
     }
   }
