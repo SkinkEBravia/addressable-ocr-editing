@@ -1,6 +1,6 @@
 # Manuscript and reproducible analysis
 
-This is a **draft**, with anonymous author metadata. It is not an arXiv submission.
+This manuscript is prepared for arXiv submission.
 
 From the repository root, Python 3.12+:
 
