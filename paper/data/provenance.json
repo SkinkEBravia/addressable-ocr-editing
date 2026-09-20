@@ -1,0 +1,930 @@
+[
+  {
+    "run": "dta19-doc-1shot-find-replace",
+    "sha256": "80123dbb20e9e0cc9ca1210d305ea6ae6af661ba9e61ad7ee86db9cb51a11130",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_anthropic_style": {
+        "toolset": "find_replace_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-find-replace-numkey",
+    "sha256": "bd65a55afac0601c4381a0af9937ff9d76f183bc6d78fa70d96b4351dce6fb00",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_numkey": {
+        "toolset": "find_replace_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-find-replace-blocked",
+    "sha256": "38e20ca3747e79a2a5bece5df990507ecaecdfc489ca7d4f74236b9ddfd1f43e",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_blocked": {
+        "toolset": "find_replace_blocked",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-patch-find-replace",
+    "sha256": "5cb3a81fe6f41aed460cb578c8cf490df9e55201b3a60cc51b9ae2fe66c7ee11",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace": {
+        "toolset": "patch_find_replace",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-patch-find-replace-noatt",
+    "sha256": "ccd33284774e0978c130e1976f255eca04c0d5988a7083aa3f498a6a87e321dc",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_noatt": {
+        "toolset": "patch_find_replace_noatt",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-patch-find-replace-unstable",
+    "sha256": "11dacb93600594b0111482d71b12d9cd3569a843ed825b0b5fc9589e8b812201",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_unstable": {
+        "toolset": "patch_find_replace_unstable",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-rewrite",
+    "sha256": "4d3a17407ef7ef1cbda21c67a35933cae966989efe660e202ac1f74d56a96c2a",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_anthropic_style": {
+        "toolset": "rewrite_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "dta19-doc-1shot-rewrite-numkey",
+    "sha256": "410d78cd093c50ce6b0ef3b3f72be03751c6023ef85c31628d71a3bd0583a779",
+    "models": {
+      "volc-deepseek-v4-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_numkey": {
+        "toolset": "rewrite_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-find-replace",
+    "sha256": "9ab1cdd03caaad4c3c81cf9560c74fc536e3d339bb0f647ec581aad788fa8d4a",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_anthropic_style": {
+        "toolset": "find_replace_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-find-replace-numkey",
+    "sha256": "61b22eb7976ee80cfba881694324548530ae15915be43cd46f7e739ff4f78cfc",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_numkey": {
+        "toolset": "find_replace_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-find-replace-blocked",
+    "sha256": "381bbf6abe52eaac1df1c6ee6d7442b27435fe676a462c15218df530f1aae4a3",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_blocked": {
+        "toolset": "find_replace_blocked",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-patch-find-replace",
+    "sha256": "4937a6eafc406efb2734d46d37b58dfde7a9cf8f32ce9bf64b5162dea8e9df8f",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace": {
+        "toolset": "patch_find_replace",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-patch-find-replace-noatt",
+    "sha256": "3622c1eeceb6f4f648051916c8f22f424b693bc27ce4b82f547b7f7242b1134d",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_noatt": {
+        "toolset": "patch_find_replace_noatt",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-patch-find-replace-unstable",
+    "sha256": "b1f5d76ab45f3a74e1ad6ae077876adf49256461e4cf2058b09426caf0d0451d",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_unstable": {
+        "toolset": "patch_find_replace_unstable",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-rewrite",
+    "sha256": "dd1b3d837fa8368ceeb52a8f314cfcbe95624070f63eff520b8716e6d8e15ed2",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_anthropic_style": {
+        "toolset": "rewrite_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "v41-dta19-doc-1shot-rewrite-numkey",
+    "sha256": "50dfc2e21fe8beb8e1a72fa4ddd99d8b94f7b455b0dc5e347b75b1271ba5c362",
+    "models": {
+      "volc-deepseek-v4.1-flash": {
+        "protocol": "openai-response",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "deepseek-v4.1-flash",
+        "key_env": "VOLCENGINE_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_numkey": {
+        "toolset": "rewrite_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-find-replace",
+    "sha256": "66923c4fa37494accba00ef3196e1e4dc8847c1c271b2aebf4f6fb5043677d0d",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_anthropic_style": {
+        "toolset": "find_replace_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-find-replace-numkey",
+    "sha256": "a13bb0b49e927b45a9f8e8615eadadb518d773dfb9a5d4557f35ff765f1febdb",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_numkey": {
+        "toolset": "find_replace_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-find-replace-blocked",
+    "sha256": "a05e9143e15cf8310bf63353ea43ee4baf05243e6a88ca0390478bf2bc3944d5",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "find_replace_blocked": {
+        "toolset": "find_replace_blocked",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-patch-find-replace",
+    "sha256": "67c8c5601540833a87595ace84802594457cbea6a16bf6d4dafa5850c98f3904",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace": {
+        "toolset": "patch_find_replace",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-patch-find-replace-noatt",
+    "sha256": "b281f51ffa4928fbf866ed81d97bfbca09392f0ed2eeeeef28a4ef641bf47e6f",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_noatt": {
+        "toolset": "patch_find_replace_noatt",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-patch-find-replace-unstable",
+    "sha256": "a1d81a9fc42bacf17f8617adb0609285d9a3b88b111e289f776163479aec8ed4",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "patch_find_replace_unstable": {
+        "toolset": "patch_find_replace_unstable",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-rewrite",
+    "sha256": "01f9003d51ee325a98cb6fbcc4dbb57fe99adefc10c901200a3037efaa9640ea",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_anthropic_style": {
+        "toolset": "rewrite_anthropic_style",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  },
+  {
+    "run": "mm3-dta19-doc-1shot-rewrite-numkey",
+    "sha256": "fc9508aff843d6af20bc83a2c56ad04e8695a72936c0375feaacb6b8424978d7",
+    "models": {
+      "minimax-m3-1m": {
+        "protocol": "anthropic",
+        "base_url": "https://api.minimax.cn/anthropic",
+        "model": "MiniMax-M3[1m]",
+        "key_env": "MINIMAX_API_KEY",
+        "temperature": null,
+        "reasoning_effort": null,
+        "context_window": 1048576,
+        "output_length": 393216,
+        "max_transport_retries": 3,
+        "timeout": 600.0,
+        "extra_body": null
+      }
+    },
+    "toolsets": {
+      "noop": {
+        "toolset": "noop",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      },
+      "rewrite_numkey": {
+        "toolset": "rewrite_numkey",
+        "max_turns": 1,
+        "token_budget": null,
+        "partition": "lines",
+        "block_size": 400,
+        "apply_mode": "atomic",
+        "hide_ops": []
+      }
+    }
+  }
+]

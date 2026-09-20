@@ -1,0 +1,42 @@
+\begin{table}[htbp]\centering\small
+\caption{All arms for DeepSeek V4 Flash. Counts use all 33 tasks. Worse means cMER exceeds the no-edit anchor; it is not a count of catastrophic errors.}
+\begin{tabular}{lrrrrrrr}\toprule
+Arm & Median & P90 & Max & Done & Edited & Worse & Leak\\\midrule
+No edit & 0.0238 & 0.0605 & 0.0659 & 33 & 0 & 0 & 0\\
+Global F/R & 0.0096 & 0.0272 & 0.0605 & 33 & 31 & 6 & 0\\
+Global + keys & 0.0087 & 0.0564 & 0.0659 & 33 & 28 & 8 & 0\\
+Blocked F/R & 0.0109 & 0.0587 & 0.0659 & 33 & 25 & 7 & 0\\
+Local patch & 0.0084 & 0.0199 & 0.0295 & 33 & 33 & 6 & 0\\
+Patch no-attn & 0.0089 & 0.0197 & 0.0621 & 33 & 32 & 8 & 0\\
+Unstable local & 0.0104 & 0.0253 & 0.0444 & 33 & 31 & 8 & 0\\
+Rewrite & 0.0120 & 0.0389 & 0.9648 & 33 & 33 & 9 & 0\\
+Rewrite + keys & 0.0110 & 0.0248 & 0.0322 & 33 & 33 & 10 & 0\\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[htbp]\centering\small
+\caption{All arms for DeepSeek V4.1 Flash. Counts use all 33 tasks. Worse means cMER exceeds the no-edit anchor; it is not a count of catastrophic errors.}
+\begin{tabular}{lrrrrrrr}\toprule
+Arm & Median & P90 & Max & Done & Edited & Worse & Leak\\\midrule
+No edit & 0.0238 & 0.0605 & 0.0659 & 33 & 0 & 0 & 0\\
+Global F/R & 0.0101 & 0.0230 & 0.0582 & 33 & 33 & 5 & 0\\
+Global + keys & 0.0097 & 0.0248 & 0.0479 & 33 & 32 & 5 & 0\\
+Blocked F/R & 0.0105 & 0.0193 & 0.0308 & 33 & 33 & 1 & 0\\
+Local patch & 0.0078 & 0.0187 & 0.0284 & 32 & 31 & 3 & 0\\
+Patch no-attn & 0.0094 & 0.0183 & 0.0276 & 33 & 33 & 5 & 0\\
+Unstable local & 0.0094 & 0.0232 & 0.0605 & 31 & 30 & 4 & 0\\
+Rewrite & 0.0104 & 0.0245 & 0.0605 & 33 & 33 & 6 & 0\\
+Rewrite + keys & 0.0119 & 0.0245 & 0.7483 & 33 & 33 & 6 & 1\\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[htbp]\centering\small
+\caption{All arms for MiniMax M3. Counts use all 33 tasks. Worse means cMER exceeds the no-edit anchor; it is not a count of catastrophic errors.}
+\begin{tabular}{lrrrrrrr}\toprule
+Arm & Median & P90 & Max & Done & Edited & Worse & Leak\\\midrule
+No edit & 0.0238 & 0.0605 & 0.0659 & 33 & 0 & 0 & 0\\
+Global F/R & 0.0232 & 0.0587 & 0.0621 & 15 & 6 & 0 & 0\\
+Global + keys & 0.0238 & 0.0605 & 0.0659 & 4 & 0 & 0 & 0\\
+Blocked F/R & 0.0238 & 0.0605 & 0.0659 & 4 & 0 & 0 & 0\\
+Local patch & 0.0238 & 0.0605 & 0.0659 & 4 & 0 & 0 & 0\\
+Patch no-attn & 0.0238 & 0.0605 & 0.0659 & 9 & 1 & 0 & 0\\
+Unstable local & 0.0232 & 0.0589 & 0.0659 & 1 & 1 & 0 & 0\\
+Rewrite & 0.0097 & 0.0496 & 0.7342 & 33 & 31 & 7 & 0\\
+Rewrite + keys & 0.0141 & 0.1167 & 0.7357 & 33 & 33 & 13 & 10\\
+\bottomrule\end{tabular}\end{table}

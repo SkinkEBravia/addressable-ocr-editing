@@ -65,7 +65,7 @@ def build_table(report: dict) -> str:
             f"| `{arm}` | **{_fmt(c.get('median'))}** | {_fmt(c.get('max'))} "
             f"| {_fmt(g('fixed_rate'), pct=True)} | {_fmt(g('broken_rate'), pct=True)} "
             f"| {_fmt(g('halluc_ins'), pct=True)} | {_fmt(g('edit_spans'), digits=1)} "
-            f"| {_fmt(g('key_leak'), pct=True)} | {_tokens(agg)} | {_status(report, arm)} |"
+            f"| {_fmt(g('key_leak'))} | {_tokens(agg)} | {_status(report, arm)} |"
         )
     return "\n".join(lines)
 

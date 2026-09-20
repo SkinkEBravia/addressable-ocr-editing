@@ -1,0 +1,49 @@
+\begin{thebibliography}{6}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Ehrmann et~al.(2026)Ehrmann, Boros, Opitz, Michail, Wagner, and
+  Clematide]{ehrmann2026hipe}
+Maud Ehrmann, Emanuela Boros, Juri Opitz, Andrianos Michail, Florian Wagner,
+  and Simon Clematide.
+\newblock Icdar 2026 hipe-ocrepair competition on llm-assisted ocr
+  post-correction for historical documents, 2026.
+\newblock URL \url{https://arxiv.org/abs/2607.08143}.
+
+\bibitem[Yang et~al.(2024)Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, and
+  Press]{yang2024sweagent}
+John Yang, Carlos~E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao,
+  Karthik Narasimhan, and Ofir Press.
+\newblock Swe-agent: Agent-computer interfaces enable automated software
+  engineering, 2024.
+\newblock URL \url{https://arxiv.org/abs/2405.15793}.
+
+\bibitem[Laban et~al.(2023)Laban, Vig, Hearst, Xiong, and Wu]{laban2023inksync}
+Philippe Laban, Jesse Vig, Marti~A. Hearst, Caiming Xiong, and Chien-Sheng Wu.
+\newblock Beyond the chat: Executable and verifiable text-editing with llms,
+  2023.
+\newblock URL \url{https://arxiv.org/abs/2309.15337}.
+
+\bibitem[Cheng et~al.(2026)Cheng, Cao, Shen, Li, Chen, Li, and
+  Hu]{cheng2026diff}
+Wei Cheng, Yongchang Cao, Chen Shen, Binhua Li, Jue Chen, Yongbin Li, and Wei
+  Hu.
+\newblock To diff or not to diff? structure-aware and adaptive output formats
+  for efficient llm-based code editing, 2026.
+\newblock URL \url{https://arxiv.org/abs/2604.27296}.
+
+\bibitem[Laban et~al.(2026)Laban, Schnabel, and Neville]{laban2026delegate}
+Philippe Laban, Tobias Schnabel, and Jennifer Neville.
+\newblock Llms corrupt your documents when you delegate, 2026.
+\newblock URL \url{https://arxiv.org/abs/2604.15597}.
+
+\bibitem[Yang et~al.(2026)Yang, Yu, and Desell]{yang2026executecode}
+Hong Yang, Qi~Yu, and Travis Desell.
+\newblock When does restricting a coding agent to execute\_code help? a regime
+  $\times$ agent-design ablation, 2026.
+\newblock URL \url{https://arxiv.org/abs/2607.10569}.
+
+\end{thebibliography}
