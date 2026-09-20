@@ -134,6 +134,29 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 
 磁带与报告直接写回宿主 `runs/`；容器内 bash 原生可用（swe_bash 后端在 Linux 下与 Windows Git Bash 行为一致）。
 
+### Response-aligned replication matrix
+
+The new three-model matrix uses the same OpenAI Responses adapter, explicit
+`reasoning_effort=high`, data, eight interfaces, one-turn budget, and output
+budget. It writes only new directories:
+
+```bash
+bash scripts/run_arxiv_response_replication.sh
+```
+
+From PowerShell, run the same script inside the container as one serial command
+(Git Bash handles the `${PWD}` bind mount syntax):
+
+```bash
+docker run --rm --env-file .env -v "${PWD}:/app" bdpc-exp bash -lc 'cd /app && bash scripts/run_arxiv_response_replication.sh'
+```
+
+The M3 config targets `https://api.minimax.cn/v1/responses` through the
+repository's `openai-response` adapter and reads `MINIMAX_API_KEY`. The two
+DeepSeek configs read `VOLCENGINE_API_KEY` and use their existing Responses
+endpoint. These are paid API calls; inspect the command and quotas before
+running.
+
 ## 设计文档
 
 从 [Docs/Design/00-dataflow.md](Docs/Design/00-dataflow.md) 的文档索引进；

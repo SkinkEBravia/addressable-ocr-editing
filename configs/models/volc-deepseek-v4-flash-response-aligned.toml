@@ -1,0 +1,11 @@
+# Response-aligned repeat configuration; it writes to a new run directory.
+protocol       = "openai-response"
+base_url       = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model          = "deepseek-v4-flash"
+key_env        = "VOLCENGINE_API_KEY"
+temperature    = 1.0
+reasoning_effort = "high"
+context_window = 1048576
+output_length  = 393216
+timeout        = 600.0
+max_transport_retries = 3

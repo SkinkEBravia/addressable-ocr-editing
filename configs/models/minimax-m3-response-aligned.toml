@@ -1,0 +1,12 @@
+# MiniMax M3 through the official OpenAI Responses-compatible endpoint.
+# The repository's openai-response adapter appends /responses to base_url.
+protocol       = "openai-response"
+base_url       = "https://api.minimax.cn/v1"
+model          = "MiniMax-M3"
+key_env        = "MINIMAX_API_KEY"
+temperature    = 1.0
+reasoning_effort = "high"
+context_window = 1000000
+output_length  = 393216
+timeout        = 600.0
+max_transport_retries = 3
