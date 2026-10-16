@@ -17,7 +17,7 @@
 def birth(source: SourceText, result: PartitionResult) -> DocumentSnapshot
 ```
 
-1. **校验契约**：`concat(d.content for d in result.blocks) == source.text`，不符抛出 `PartitionError`（严格分区的验收点在边界，而非信任上游）。
+1. **校验契约**：满足 [02 的严格分区契约](02-partition.md#partitionresult)：按序拼接等于原文、每块内容非空、空文本对应空块序列。不符抛出 `PartitionError`（严格分区的验收点在边界，而非信任上游）。当前只实现拼接等式校验，拒绝空内容块的完整入口校验待实现，见[设计清理计划](../../plan/design-cleanup.md#待实现的严格分区入口校验)。
 2. **装订 key**：`key_cursor` 从 1 起，按序为每个 `BlockDraft` 分配 `b{cursor}`。
 3. **写入文档级数据**：`result.doc_attrs` 原样进入快照 `doc_attrs`；另写入保留键：
 
@@ -72,7 +72,7 @@ def set_current(store, snapshot_id: SnapshotId) -> None   # rollback 的物理�
   current                      # 纯文本，内容为当前 SnapshotId
 ```
 
-快照清单 = [03 定义的逻辑格式](03-ir-data.md#持久化格式)中，每个块条目的 `content` / `attrs` 替换为引用：
+快照清单 = [03 定义的逻辑格式](03-ir-data.md#逻辑表示)中，每个块条目的 `content` / `attrs` 替换为引用：
 
 ```json
 { "spec": 1, "id": "s-a3f9…", "doc_attrs": { … }, "key_cursor": 3,
