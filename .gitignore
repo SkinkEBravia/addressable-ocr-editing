@@ -12,9 +12,13 @@ wheels/
 
 # project scratch
 .pytest-tmp/
+.claude/
 Dump/
 deep_seek.txt
 .env
+resp_packy*.txt
+resp_packy*.json
+temp_progress.txt
 runs/
 related_agents/
 runs-backup/

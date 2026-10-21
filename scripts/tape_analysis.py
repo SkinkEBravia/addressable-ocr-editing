@@ -14,7 +14,7 @@
       按 call 数计会严重低估（实测 0.7/篇 vs 实际 23.8/篇）；
     - patch 早期以 ``apply_mode=atomic`` 运行时，单条失败会整批回滚 —— 只有把
       「提交 op 数」与「整批失败」分开统计，才能看出每-op 精度其实很高
-      （见 Docs/shit.md #11）。
+      （见 Docs/pitfalls.md #11）。
 
 注意：``results[].ok`` 反映的是**磁带录制时**的应用结果。若该 run 后来做过
 ``--replay``（replay 只改 ``session.output``，不改 ``turns``），本脚本的失败率

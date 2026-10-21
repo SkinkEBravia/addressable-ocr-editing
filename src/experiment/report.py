@@ -51,7 +51,7 @@ def _order_stats(values: list[float]) -> dict[str, float]:
     [0.0048, 0.0751]。只看均值会把「1/11 的稀有灾难」误读成「普遍更差」。
 
     与 `DELEGATE-52`（arXiv:2604.15597 §5）一致：稀疏的灾难性失败解释了
-    约 80% 的文档退化。详见 Docs/shit.md #14。
+    约 80% 的文档退化。详见 Docs/pitfalls.md #14。
     """
     ordered = sorted(values)
     n = len(ordered)

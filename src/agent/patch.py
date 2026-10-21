@@ -193,7 +193,7 @@ class PatchToolSet:
 
         为什么在 parse 而不是 degrade：
         - 早失败，反馈更直接（``ToolParseError`` 的消息原样成为下一轮 user 消息）；
-        - 不触发 ``apply_mode="atomic"`` 的整批回滚（见 Docs/shit.md #11）。
+        - 不触发 ``apply_mode="atomic"`` 的整批回滚（见 Docs/pitfalls.md #11）。
 
         语法错误不在此处报告 —— 交给 ``invoke`` 里既有的 ``surface.ParseError``
         处理路径，保持行为不变。

@@ -264,7 +264,7 @@ l2 的 `rewrite` 是同一形态：`broken_del` 均值 349.9 由**单篇 3731** 
 | **l2** | doc | 0.0587 | 0.0527◊ | **0.0193** | 0.0194 | 0.0239 |
 | **l2** | seq-local | 0.0587 | 0.0206 | **0.0191** | 0.0232 | 0.0204 |
 
-l2-doc 的 `patch` 取自 `runs/dta19-l2-doc-1t-be`（best_effort）。atomic 版为中位 0.0527 / 均值 0.0461 / fixed 30.3%；best_effort 版中位 **0.0239** / 均值 0.0291 / fixed **66.6%**（见缺陷 B）。**该 -be 报告仅 `patch-1turn` 一栏可用**，其 `rewrite` 已被 replay 破坏（Docs/shit.md #13）。
+l2-doc 的 `patch` 取自 `runs/dta19-l2-doc-1t-be`（best_effort）。atomic 版为中位 0.0527 / 均值 0.0461 / fixed 30.3%；best_effort 版中位 **0.0239** / 均值 0.0291 / fixed **66.6%**（见缺陷 B）。**该 -be 报告仅 `patch-1turn` 一栏可用**，其 `rewrite` 已被 replay 破坏（Docs/pitfalls.md #13）。
 
 **尾部（max）—— 只在同形态内跨臂比较有效：**
 
@@ -426,7 +426,7 @@ l0 各臂的均值/中位比：doc 形态 **1.10–4.68×**；seq-local 形态 *
 > [!warning] 新指标只在**重建报告之后**才出现
 > `edit_spans` / 九个子分量都来自 scorer。已有 report.json 里没有，需对每个 run 跑
 > `--report-only`（零 API，从磁带重新评分）。
-> ⚠️ 不要对 `runs/dta19-l2-doc-1t-be` 重建 —— 那份报告的 `rewrite` 已被 replay 破坏（见 Docs/shit.md #13）。
+> ⚠️ 不要对 `runs/dta19-l2-doc-1t-be` 重建 —— 那份报告的 `rewrite` 已被 replay 破坏（见 Docs/pitfalls.md #13）。
 
 
 ### 批 1：两个探针

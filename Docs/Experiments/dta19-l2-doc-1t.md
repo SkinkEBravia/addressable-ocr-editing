@@ -18,7 +18,7 @@
 |---|---|---|
 | noop | 锚点 | 不调 LLM，no-correction 基线 |
 | rewrite | 单轮长文重写 | 全文一次性重写；JSON 条款 |
-| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；**apply_mode=best_effort**，未隐去任何操作（全部七个 SurfaceOp）。原以默认的 `atomic` 运行，单条 `replace` 失配即整批回滚，已用磁带重放修正 —— 见 [[shit#11. 实验记录里的配置描述与 toml 不符]] |
+| patch-1turn | 整篇块 id 补丁 | 单轮行划分 patch（约 300~400 行）；**apply_mode=best_effort**，未隐去任何操作（全部七个 SurfaceOp）。原以默认的 `atomic` 运行，单条 `replace` 失配即整批回滚，已用磁带重放修正 —— 见 [[pitfalls#11. 实验记录里的配置描述与 toml 不符]] |
 | swe_edit | 整篇行号编辑 | 单轮行号区间替换（edit start:end "text"） |
 | find_replace | 整篇字符串替换 | 单轮字面字符串匹配替换（find_replace "old" "new"） |
 
@@ -58,7 +58,7 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 
 > [!note] 口径（2026-09-06 全面重算）
 > - **主口径为中位数** —— 均值在本数据上被重尾污染（l0-doc 的 `swe_edit` 均值/中位 = 4.68×）。均值与 CI 并列保留，`max` 单列。
-> - **`patch` 臂全部为 `apply_mode="best_effort"`**。此前以默认的 `atomic` 运行，单条 `replace` 失配即整批回滚，作废了 19.5%~83.7% 的已提交 op。旧的 atomic 数字已从本记录移除，事故记录见 [[shit#11. 实验记录里的配置描述与 toml 不符]]。
+> - **`patch` 臂全部为 `apply_mode="best_effort"`**。此前以默认的 `atomic` 运行，单条 `replace` 失配即整批回滚，作废了 19.5%~83.7% 的已提交 op。旧的 atomic 数字已从本记录移除，事故记录见 [[pitfalls#11. 实验记录里的配置描述与 toml 不符]]。
 > - 指标定义见 `datasets/hipe_2026/dataset.py`；`edit_spans` = 由 input↔output 对齐得出的改动区域数（**跨臂统一口径**，`rewrite` 无显式 op 也可算）。
 
 
@@ -115,6 +115,6 @@ uv run python -m experiment --dataset datasets/hipe_2026 \
 - 磁带：`runs/dta19-l2-doc-1t/sessions/`（唯一权威来源，两个报告共用同一批磁带）
 - 报告：`runs/dta19-l2-doc-1t/report.json`（`noop`/`rewrite`/`swe_edit`/`find_replace`）
 - **`patch-1turn` 的数字取自** `runs/dta19-l2-doc-1t-be/report.json` —— 同一批磁带以 `apply_mode=best_effort` 重放（`--replay-with patch-1turn=patch-1turn-besteffort`）+ `--report-only`
-- ⚠️ `runs/dta19-l2-doc-1t-be` 的 **`rewrite` 栏不可用** —— replay 重 fold 了全部臂，5 个 `failed:incomplete` 会话的回退语义丢失，cmer 被抬到 1.0。见 [[shit#13. `--replay` 会重 fold 全部臂，且毁掉失败会话]]
+- ⚠️ `runs/dta19-l2-doc-1t-be` 的 **`rewrite` 栏不可用** —— replay 重 fold 了全部臂，5 个 `failed:incomplete` 会话的回退语义丢失，cmer 被抬到 1.0。见 [[pitfalls#13. `--replay` 会重 fold 全部臂，且毁掉失败会话]]
 - 数据集规模：`dta19-l2` dev split 共 11 篇文档（同 L0/L1 相同的 11 篇源文档与抽样页），总计 11 × 5 = 55 个 session。
 - 官方参考基线：官方评测中 `dta19-l2` 的 `noop` cMER micro 为 0.0546，blocr 达到 0.0338，bnf-mistral 达到 0.0082。

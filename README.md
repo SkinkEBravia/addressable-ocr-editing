@@ -1,4 +1,10 @@
-# Batch-Doc-Process-V2
+# addressable-ocr-editing
+
+An experiment framework for LLM-based OCR post-correction. Given the same task
+and the same model, it compares different tool interfaces (noop / rewrite /
+patch / find_replace / swe_edit / …) on correction quality (cMER) and token
+cost. Every session is recorded as an auditable, replayable tape; LLM access
+goes through a pinned LiteLLM client. (中文说明见下。)
 
 OCR 后矫正（post-correction）实验框架：同一份任务、同一个模型，比较不同**工具配置**（noop / rewrite / patch / find_replace / *_seq …）的指标与 token 成本。
 
