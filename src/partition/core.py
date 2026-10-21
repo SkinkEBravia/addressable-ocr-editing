@@ -46,8 +46,8 @@ class BlockDraft:
 class PartitionResult:
     """partition 的输出：有序块序列 + 文档级元数据。
 
-    契约（严格分区）：``concat(d.content for d in blocks) == source.text``，
-    空文本对应空 ``blocks``（唯一例外）。
+    契约（严格分区）：块内容按序拼接等于 source.text，每块内容非空；
+    空文本对应空 blocks，仍满足拼接等式。
     """
 
     blocks: tuple[BlockDraft, ...]
@@ -57,7 +57,8 @@ class PartitionResult:
 def partition_chars(source: TextSource, size: int) -> PartitionResult:
     """参考实现：每 ``size`` 个字符切一块，最后一块允许短于 ``size``。
 
-    - 每块 attrs：``{"start": <int>}``，该块在全文中的起始字符偏移。
+    - 每块 attrs：``{"start": <int>}``，分区时输入的 SourceText.text 中的位置。
+      使用 Python str 索引，编辑后不自动更新。
     - doc_attrs：``{"partition": "chars", "size": size}``。
     - 空文本 -> 空 blocks。
     """
@@ -75,7 +76,8 @@ def partition_chars(source: TextSource, size: int) -> PartitionResult:
 def partition_lines(source: TextSource) -> PartitionResult:
     """参考实现：按行切分（``str.splitlines(keepends=True)`` 语义），行终止符归属其所在块。
 
-    - 每块 attrs：``{"start": <int>, "line": <int>}``，分别为起始字符偏移与 0 起的行号。
+    - 每块 attrs：``{"start": <int>, "line": <int>}``，分别为分区时输入的
+      SourceText.text 中的位置与 0 起的行号，编辑后不自动更新。
     - doc_attrs：``{"partition": "lines"}``。
     - 空文本 -> 空 blocks。
     """
@@ -88,7 +90,7 @@ def partition_lines(source: TextSource) -> PartitionResult:
 
 
 def to_json(result: PartitionResult) -> str:
-    """PartitionResult -> JSON 字符串。全体成员均为 str / JsonValue，无需自定义编码器。"""
+    """先将 dataclass／tuple 转成普通 JSON 数据结构，再编码为字符串。"""
     return json.dumps(
         {
             "blocks": [{"content": b.content, "attrs": b.attrs} for b in result.blocks],

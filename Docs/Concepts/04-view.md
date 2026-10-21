@@ -6,7 +6,7 @@
 
 > **定义 AgentView**
 >
-> 专门服务于 Agent 的一种视图。其 `payload` 中，对还原的文本插入 ID 标注将文本分块，分块方式与文档快照相同，但 ID 的形式不同，这些 ID 称为 `AgentBlockId`，通过双射 `ReferenceMap` 与 `BlockKey` 联系。这是为了让 Agent 通过有语义的 ID 操作 Block。
+> 专门服务于 Agent 的一种文本视图。其 `payload` 按快照中的块顺序生成，是否显示 ID 标注由标注形式决定。Agent 侧地址称为 `AgentBlockId`，通过双射 `ReferenceMap` 与 `BlockKey` 联系；它的值也可以直接采用 BlockKey。无标注的展示仍可携带该映射。地址映射支持 Agent 按所选 ID 策略操作 Block。
 
 同一个快照可以有不同的视图、不同的 `AgentBlockId` 策略。View 通过 `Presenter` 产生。
 

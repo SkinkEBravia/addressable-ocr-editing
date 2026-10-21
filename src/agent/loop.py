@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agent.assembly import build_initial_messages
 from agent.session import Session, Turn
-from agent.toolset import DONE, Budget, Done, ToolParseError, ToolSet
+from agent.toolset import Budget, Done, ToolParseError, ToolSet
 from llm import Failure, LLMClient, LLMError, Message
 
 __all__ = ["start_session", "run_session"]

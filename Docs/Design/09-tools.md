@@ -271,7 +271,7 @@ extract: (tool_state, session) -> SourceText   # SourceText 见 01（text + enco
 横向比较 harness 本身（codex 等）时，driver 换成外部进程，产出**同一个 Session 结构**（turns 里 messages 可为 harness 侧摘要，usage 取 harness 自报、取不到记 None）⇒ 评分、落盘、replay 无差别复用。
 
 - **口径警示**：外部 harness 含其自有隐藏提示词与内部流程开销，与 in-house loop 不 token 对账；报告必须注明此为 harness 级口径，不与工具配置级口径混排。
-- 本系统的操作面经 CLI / MCP 挂给外部 harness，封装归 [07](07-agent-api.md)；本模块只消费这一事实。
+- 本系统的操作面可经现有 CLI 挂给外部 harness；MCP 封装是尚未实现的未来设计，职责归 [07](07-agent-api.md)。本模块不实现这些进程或传输封装。
 
 ## 验收
 

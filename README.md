@@ -53,13 +53,14 @@ report 的 `failure` 段（`rejected` / `incomplete` / `timeout` …，含 http_
 组装上下文 → agent loop（Session，逐轮落盘磁带）→ 工具 fold → SourceText → 评测
 ```
 
-四个阶段各有公开契约，模块间只经契约交互。详见 [Docs/Design/00-dataflow.md](Docs/Design/00-dataflow.md)。
+四个阶段各有公开契约，模块间只经契约交互。详见 [Docs/Design/00-overview.md](Docs/Design/00-overview.md)。
 
 ## 替换与开发组件
 
 | 要换什么 | 怎么做 | 契约文档 |
 |---|---|---|
-| 模型 / 端点 | `configs/models/*.toml` 加一个文件（protocol / base_url / key_env / 采样键）；新协议加一个 `llm` 适配器 | [08-llm](Docs/Design/08-llm.md) |
+| 模型 / 端点 | `configs/models/*.toml` 加一个文件（protocol / base_url / key_env / 采样键）；协议调用由 LiteLLM 封装处理 | [08-llm](Docs/Design/08-llm.md) |
+| LLM 客户端 | 保留 `ModelConfig + list[Message] → Completion`，替换 `llm/litellm_client.py` 和 `build_client` 的构造入口 | [08 输入输出接口](Docs/Design/08-llm.md#输入输出接口) |
 | 工具配置 | `configs/toolsets/*.toml` 加一个文件：`toolset` + `max_turns` / `token_budget`，patch 系另有 `apply_mode`（atomic / best_effort）与 `hide_ops` | [09-tools](Docs/Design/09-tools.md) |
 | 工具集 | 实现 `ToolSet` 契约五件套（`make_tool_state` / `present_input` / `parse` / `invoke` / `extract`），注册进 `agent.REGISTRY` | [09-tools](Docs/Design/09-tools.md) |
 | 数据集 | 一个目录 + 一个 `dataset.py`（`loaders` / `scorer` / `default_instruction` / `info` 四入口），过同一份契约测试 | [10-datasets](Docs/Design/10-datasets.md) |

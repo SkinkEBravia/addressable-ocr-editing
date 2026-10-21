@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from agent.session import Session
-from agent.toolset import DONE, Done, ToolCall, ToolParseError, ToolResult
+from agent.toolset import Done, ToolCall, ToolParseError, ToolResult
 from sourceio import SourceText
 
 __all__ = ["SweBashToolSet", "ShellBackend", "GitBashBackend", "SWE_BASH_CLAUSE"]

@@ -1,4 +1,4 @@
-"""IR 出生接口：PartitionResult -> DocumentSnapshot。
+"""IR 出生接口：(来源文本, PartitionResult) -> DocumentSnapshot。
 
 对应 Docs/Design/05-ir-io.md「出生接口」节。
 
@@ -47,16 +47,18 @@ class PartitionResultLike(Protocol):
 
 
 def birth(source: SourceLike, result: PartitionResultLike) -> DocumentSnapshot:
-    """PartitionResult -> DocumentSnapshot。
+    """(source, result) -> DocumentSnapshot。
 
-    1. 校验契约：concat(d.content for d in result.blocks) == source.text，
-       不符抛 PartitionError（严格分区的验收点在边界，而非信任上游）。
+    1. 拒绝空内容块，并校验拼接结果等于 source.text，失败抛 PartitionError。
+       空原文只有空块序列可通过校验。
     2. 装订 key：key_cursor 从 1 起，按序为每个块坯分配 b{cursor}。
     3. result.doc_attrs 原样进入快照 doc_attrs；另写入保留键
        "source": {"encoding": ..., "bom": <hex str>}（无 BOM 为空串）。
     4. 生成 SnapshotId。
     """
     drafts = list(result.blocks)
+    if any(d.content == "" for d in drafts):
+        raise PartitionError("strict partition violated: block content must be nonempty")
     concat = "".join(d.content for d in drafts)
     if concat != source.text:
         raise PartitionError(

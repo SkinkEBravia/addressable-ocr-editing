@@ -3,7 +3,7 @@
 对应 Docs/Design/08-llm.md「错误」节。
 
 三通道：对话通道（模型修，不进本层）/ 重试通道（client 修）/ 失败通道
-（人修，LLMError 携带结构化 Failure）。分类只发生在适配器层。
+（人修，LLMError 携带结构化 Failure）。分类由 llm 封装转换 SDK 异常完成。
 安全约束：API key 不进入异常消息与 Failure detail。
 """
 

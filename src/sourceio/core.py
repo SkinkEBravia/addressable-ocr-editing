@@ -44,8 +44,9 @@ _BOMS: tuple[tuple[bytes, str], ...] = (
 def decode(raw: bytes) -> SourceText:
     """bytes -> SourceText。
 
-    1. 检测 BOM（utf-8-sig / utf-16-le / utf-16-be）；命中则按对应编码解码，
+    1. 检测 UTF-8／UTF-16 LE／UTF-16 BE 的 BOM；命中则按对应编码解码，
        BOM 字节记入 ``bom``，不进入 ``text``。
+       UTF-8 的 encoding 保存为 utf-8，不使用 utf-8-sig。
     2. 无 BOM 则按 UTF-8 严格解码，``bom = b""``。
     3. 解码失败抛 ``DecodeError``；不做编码猜测，不替换非法字节。
 

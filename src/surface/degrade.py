@@ -1,7 +1,6 @@
 """降解：SurfaceOp 序列 -> core op 序列（带溯源信息）。
 
-对应 Docs/Design/07-agent-api.md「降解」节与 04-ir-ops.md「surface 语义的
-降解」节：
+对应 Docs/Design/07-agent-api.md「降解」节：
 
 - ``AgentBlockId`` 经 ``ReferenceMap`` 换回 ``BlockKey``；``HEAD`` 直接映射
   为 ``ir.HEAD``（不经 ref_map，且仅在 anchor 位置合法）。
@@ -18,10 +17,11 @@
 a.content + b.content、replace 的 content），因此签名带第三个参数
 ``snapshot``。
 
-**内容状态链式，身份与结构静态**：同一 patch 内，对同一块的内容操作
+**内容与属性链式，身份与结构静态**：同一 patch 内，对同一块的内容操作
 （set_content / replace / merge 的合入内容、move 带走的 draft）按文本
 顺序叠加——后续操作看到同批次前面操作的结果；``set_content`` 是绝对
-重置。块身份（id -> key）与结构（谁在谁后面）始终以 patch 前快照为准。
+重置。set_attrs 同样累计，move 带走当前属性。块身份（id -> key）与结构
+（谁在谁后面）始终以 patch 前快照为准。
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 import ir
 from ir import Block, DocumentSnapshot, Op
+from partition import BlockDraft
 from view import ReferenceMap
 
 from surface.errors import PATTERN_NOT_FOUND, STAGE_DEGRADE, SurfaceError
@@ -136,6 +137,7 @@ def degrade(
     by_key = {b.key: b for b in snapshot.blocks}
     # 批次内累计内容：key -> 最新内容。内容操作链式生效（见模块 docstring）。
     content_state: dict[str, str] = {}
+    attrs_state: dict[str, ir.Attrs] = {}
 
     def current_content(key: str, index: int, position: LineSpan) -> str:
         """块的当前内容：批次内已被改则取累计值，否则取 patch 前快照。"""
@@ -153,13 +155,13 @@ def degrade(
                 core = [ir.SetContent(key=key, content=text)]
             case SetAttrs(id=agent_id, attrs=attrs):
                 key = _target_key(agent_id, ref_map, index, position)
+                attrs_state[key] = dict(attrs)
                 core = [ir.SetAttrs(key=key, attrs=dict(attrs))]
             case Append(anchor=anchor, text=text, attrs=attrs):
                 at = _anchor_key(anchor, ref_map, index, position)
                 core = [
                     ir.Append(
-                        draft_content=text,
-                        draft_attrs=dict(attrs) if attrs else {},
+                        draft=BlockDraft(content=text, attrs=dict(attrs) if attrs else {}),
                         at=at,
                     )
                 ]
@@ -174,8 +176,10 @@ def degrade(
                     ir.Remove(key=key),
                     ir.Append(
                         # draft 取链式内容：move 带走批次内已做的修改
-                        draft_content=current_content(key, index, position),
-                        draft_attrs=dict(block.attrs),
+                        draft=BlockDraft(
+                            content=current_content(key, index, position),
+                            attrs=dict(attrs_state.get(key, block.attrs)),
+                        ),
                         at=at,
                     ),
                 ]

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ir import Block
 
-from view.types import AgentBlockId, AgentIdStrategy, Annotator
+from view.types import AgentBlockId, AgentIdStrategy
 
 __all__ = [
     "blockkey_as_is",

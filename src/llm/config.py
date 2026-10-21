@@ -4,9 +4,8 @@
 
 - TOML 一文件一模型，默认放 configs/models/，文件名即标签。
 - 未知键直接报 ConfigError（防拼写漂移）。
-- 采样参数（temperature / reasoning_effort）允许留空：缺席 = 不下发该参数，
-  用端点默认。「缺席」在解析后为 None，与显式值可区分。
-- context_window / output_length 是声明性信息（v1 不改变请求行为）。
+- temperature／reasoning_effort 未配置时为 None，不由该字段添加请求参数。
+- context_window 仅记录模型信息；output_length 明确设置时发送输出上限。
 - key 只从环境变量读取；load_env_file 把项目根 .env 加载进进程环境。
 """
 
@@ -50,7 +49,7 @@ _KNOWN_KEYS = frozenset(
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """一个可用模型的完整描述。采样键为 None 表示缺席（不下发）。"""
+    """一个可用模型的完整描述。采样键为 None 表示未配置，不发送该参数。"""
 
     name: str  # 报告标签（= 文件名或调用方标签）
     protocol: str  # openai-completion | openai-response | anthropic
@@ -60,7 +59,7 @@ class ModelConfig:
     temperature: float | None = None
     reasoning_effort: str | None = None
     context_window: int | None = None  # 信息性，暂不使用
-    output_length: int | None = None  # 信息性，暂不使用
+    output_length: int | None = None  # 明确设置时发送为协议对应的输出上限
     max_transport_retries: int = 3
     timeout: float = 600.0
     extra_body: dict | None = None  # 端点专属参数，原样并入请求体顶层
@@ -128,7 +127,7 @@ def model_config_from_dict(name: str, d: dict) -> ModelConfig:
 
 
 def _parse_extra_body(name: str, value: object) -> dict | None:
-    """extra_body 必须是 TOML 表（缺席 = None，不并入请求体）。"""
+    """extra_body 必须是 TOML 表；未配置时为 None，不并入请求体。"""
     if value is None:
         return None
     if not isinstance(value, dict):

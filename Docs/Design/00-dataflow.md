@@ -1,5 +1,7 @@
 # 数据流
 
+> 历史文档：本篇已由 [00-overview.md](00-overview.md) 替代，不再作为现行设计依据。下文保留旧链路和验收表达，仅供历史查阅；当前契约以新总览及对应设计文档为准。
+
 ## 目的
 
 给 Agent 分块操作文档的能力：文本文件拆进 IR，产出 Agent 看的 View，按块编辑，最后还原回文件。
@@ -16,7 +18,7 @@ SourceText -> tuple[BlockDraft, ...] + 文档级 attrs
 [中间表示.出生]                               // 05-ir-io.md
 tuple[BlockDraft, ...] + 文档级 attrs -birth(装订BlockKey)-> DocumentSnapshot
 
-[中间表示.输出]                               // 05 统一输出接口：快照即唯一输出
+[快照消费]                                   // 05 重建接口；06 呈现接口
 DocumentSnapshot -> reconstruct -> SourceText -> file   // 消费方：还原到文件
 DocumentSnapshot -> present -> View                     // 消费方：视图，06-view.md
 ...                                                     // 其他消费方（transforms 等）
@@ -61,8 +63,8 @@ IR 重建 reconstruct(build(blocks)) == s.text
 | [01-ingestion.md](01-ingestion.md) | 数据摄入：bytes ↔ SourceText |
 | [02-partition.md](02-partition.md) | 块生成：严格分区、Attrs、BlockDraft |
 | [03-ir-data.md](03-ir-data.md) | IR 数据结构与持久化格式 |
-| [04-ir-ops.md](04-ir-ops.md) | 状态迁移：核心 op、apply、OpError、RollBack |
-| [05-ir-io.md](05-ir-io.md) | 出生、统一输出接口、store（CAS）与会话 |
+| [04-ir-ops.md](04-ir-ops.md) | 状态迁移：核心 op、apply、OpError |
+| [05-ir-io.md](05-ir-io.md) | 出生、重建、快照存储与当前指针 |
 | [06-view.md](06-view.md) | View、AgentId 策略、标注形式 |
 | [07-agent-api.md](07-agent-api.md) | SurfaceOp 标准集、错误回传、默认组件、CLI |
 | [08-llm.md](08-llm.md) | LLM 客户端：协议适配、凭证、采样参数、对话 |

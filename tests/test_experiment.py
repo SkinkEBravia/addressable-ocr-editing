@@ -184,3 +184,18 @@ def test_cli_noop_needs_no_credentials(tmp_path):
     ])
     assert rc == 0
     assert (tmp_path / "out" / "report.json").is_file()
+
+
+def test_cli_rejects_empty_toolsets_before_creating_run(tmp_path, capsys):
+    from experiment.__main__ import main
+
+    out = tmp_path / "out"
+    rc = main([
+        "--dataset", "datasets/tiny", "--toolsets", "",
+        "--model", "unused", "--split", "all",
+        "--out", str(out), "--reporter", "null",
+    ])
+
+    assert rc == 2
+    assert "--toolsets must contain at least one toolset name" in capsys.readouterr().err
+    assert not out.exists()

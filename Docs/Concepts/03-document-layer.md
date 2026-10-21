@@ -14,9 +14,11 @@
 >
 > 文档层不定义快照如何诞生，也不定义快照如何输出。两者各由一个接口承担。
 
+`BlockDraft` 表示尚未分配 BlockKey 的块坯，仅包含 content 与 attrs。
+
 状态迁移操作集：
 
-- `Append(Block, at)` —— 插入到锚点 `at` 之后，`at ∈ BlockKey ∪ {Head}`
+- `Append(BlockDraft, at)` —— 为块坯分配 BlockKey，插入到锚点 `at` 之后，`at ∈ BlockKey ∪ {Head}`
 - `Remove(BlockKey)`
 - `SetContent(BlockKey, content)`
 - `SetAttrs(BlockKey, attrs)`

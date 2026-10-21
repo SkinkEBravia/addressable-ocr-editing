@@ -46,6 +46,11 @@ def fake_result(texts: list[str], doc_attrs=None):
 
 
 class TestBirth:
+    @pytest.mark.parametrize("texts", [[""], ["", ""], ["", "x"], ["x", ""]])
+    def test_birth_rejects_empty_drafts(self, texts):
+        with pytest.raises(PartitionError, match="nonempty"):
+            birth(fake_source("".join(texts)), fake_result(texts))
+
     def test_birth_basic(self):
         source = fake_source("第一段。第二段。第三段。")
         result = fake_result(["第一段。", "第二段。", "第三段。"])
@@ -123,7 +128,7 @@ def snapshot_count(store: Store) -> int:
 
 
 class TestStoreRoundTrip:
-    """验收：load(save(store, s)) == s。"""
+    """验收：load(store, save(store, s)) == s。"""
 
     def test_save_load_roundtrip(self, tmp_path):
         store = Store(tmp_path / "session")
@@ -207,14 +212,14 @@ class TestCurrentPointer:
         s1 = make_snapshot()
         save(store, s1)
         assert current(store) == s1.id
-        s2 = apply(s1, (Append("新", {}, at="b3"),))
+        s2 = apply(s1, (Append(SimpleNamespace(content="新", attrs={}), at="b3"),))
         save(store, s2)
         assert current(store) == s2.id
 
     def test_set_current_is_rollback(self, tmp_path):
         store = Store(tmp_path / "session")
         s1 = make_snapshot()
-        s2 = apply(s1, (Append("新", {}, at="b3"),))
+        s2 = apply(s1, (Append(SimpleNamespace(content="新", attrs={}), at="b3"),))
         save(store, s1)
         save(store, s2)
         set_current(store, s1.id)          # RollBack 的物理实现
@@ -254,7 +259,7 @@ class TestBirthStoreIntegration:
         """出生 → 迁移 → 落盘 → 装配，全链路往返相等。"""
         store = Store(tmp_path / "session")
         s1 = birth(fake_source("甲。乙。"), fake_result(["甲。", "乙。"]))
-        s2 = apply(s1, (Append("丙。", {}, at="b2"),))
+        s2 = apply(s1, (Append(SimpleNamespace(content="丙。", attrs={}), at="b2"),))
         save(store, s1)
         save(store, s2)
         assert load(store, s2.id) == s2

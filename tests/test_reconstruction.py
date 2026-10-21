@@ -3,7 +3,7 @@
 覆盖：
 - reconstruct -> encode 与原文逐字节相同（utf-8 无 BOM / utf-8-sig /
   utf-16-le 带 BOM / CRLF 混合）
-- doc_attrs["source"] 缺失或字段非法时的回退（utf-8 无 BOM）
+- 来源编码无效时回退 utf-8 无 BOM；仅 bom 缺失时保留原编码
 - 端到端等式（00-dataflow.md 的总闸）：tmp 文件 -> sourceio.read ->
   partition_chars -> birth -> reconstruct -> sourceio.write ->
   逐字节等于原文件（含非 ASCII、CRLF、空文件）

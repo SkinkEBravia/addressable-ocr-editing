@@ -3,7 +3,7 @@
 对应 06-view.md 的验收：
 - reference_map 为双射且覆盖全部 blocks
 - 同一 (snapshot, strategy, annotator) 重复 present，payload 与
-  reference_map 相同（view_id 可不同）
+  reference_map 与 view_id 均相同
 
 另覆盖：重复 id 抛 ViewError、xml_ish 逐字符断言、render_blocks 子集渲染
 与全量一致、空快照 payload 为空串。
@@ -57,6 +57,28 @@ class TestBlockkeyAsIs:
 
 
 class TestPresent:
+    def test_identity_covers_source_mapping_and_final_file_metadata(self):
+        from dataclasses import replace
+        from ir import snapshot_id
+        snapshot = _snapshot("abcd", size=2)
+        base = present(snapshot, blockkey_as_is, plain)
+        changed = replace(snapshot, doc_attrs={**snapshot.doc_attrs, "note": "other"})
+        changed = replace(changed, id=snapshot_id(changed))
+        assert present(changed, blockkey_as_is, plain).payload == base.payload
+        assert present(changed, blockkey_as_is, plain).view_id != base.view_id
+        def mapping(prefix):
+            def same_name(block, index):
+                return prefix + block.key
+            return same_name
+        a = present(snapshot, mapping("a"), plain)
+        b = present(snapshot, mapping("b"), plain)
+        assert a.payload == b.payload and a.render_spec == b.render_spec
+        assert a.view_id != b.view_id
+        file_view = present_file(snapshot, "first", annotator=plain, strategy=blockkey_as_is)
+        assert file_view.view_id != base.view_id
+        assert file_view == present_file(snapshot, "first", annotator=plain, strategy=blockkey_as_is)
+        assert file_view.view_id != present_file(snapshot, "second", annotator=plain, strategy=blockkey_as_is).view_id
+
     def test_reference_map_bijective_and_covers_all_blocks(self) -> None:
         snapshot = _snapshot("一二三四五六七八九十", size=3)
         view = present(snapshot, blockkey_as_is, xml_ish)
@@ -80,7 +102,7 @@ class TestPresent:
         assert v1.payload == v2.payload
         assert v1.reference_map.as_dict() == v2.reference_map.as_dict()
         assert v1.snapshot_id == v2.snapshot_id == snapshot.id
-        assert v1.view_id != v2.view_id  # 身份可不同，内容由 (snapshot, strategy, annotator) 确定
+        assert v1 == v2
 
     def test_render_spec_records_component_names(self) -> None:
         snapshot = _snapshot("ab", size=1)

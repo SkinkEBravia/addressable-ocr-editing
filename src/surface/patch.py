@@ -2,12 +2,12 @@
 
 对应 Docs/Design/07-agent-api.md「接口」节：
 
-    load(current) -> parse -> degrade -> apply -> save -> 渲染受影响块 -> PatchResult
+    load(current) -> parse -> degrade -> apply -> 构建回执 -> save -> PatchResult
 
 行为规则：
 
-- core ops 一次性 ``apply``（apply 本身原子），全部成功后才 ``save``——
-  patch 失败时 store 不变。
+- atomic 的核心操作与回执均成功后才保存；这些阶段失败不会提交候选状态。
+  best_effort 按成功操作逐条提交；I/O 保证沿用 05，不提供跨文件事务。
 - ``apply`` 失败时用 ``OpError.index`` 查 origin 回溯，包装成
   ``SurfaceError``（stage="apply"）抛出；解析失败抛 ``ParseError``，
   降解失败抛 ``SurfaceError``（stage="degrade"）。
@@ -78,7 +78,7 @@ class AffectedBlock:
     status: str
     """appended / updated / moved / merged / removed。"""
     annotated: str | None
-    """用同一 (strategy, annotator) 渲染的带标注内容；removed 时为 None。"""
+    """用同一策略与标注形式渲染的内容，可使用 plain；removed 时为 None。"""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,10 +124,10 @@ def run_patch(
     *,
     mode: str = APPLY_ATOMIC,
 ) -> PatchResult:
-    """load(current) -> parse -> degrade -> apply -> save -> 渲染受影响块。
+    """load(current) -> parse -> degrade -> apply -> 构建回执 -> save。
 
     ``mode=atomic``（默认）：失败抛 ``ParseError``（解析）或
-    ``SurfaceError``（降解 / apply）；失败时 store 不变。
+    ``SurfaceError``（降解 / apply）；回执也在保存前构建，I/O 失败沿用 Store 保证。
     ``mode=best_effort``：语义失败逐条跳过、记入回执 ``errors``，
     其余照常提交；只有 ParseError（语法）仍抛出。
     """
@@ -141,7 +141,6 @@ def run_patch(
             new_snapshot = ir.apply(snapshot, core_ops)
         except OpError as exc:
             raise _wrap_op_error(exc, entries) from exc
-        ir.save(store, new_snapshot)
         affected = _affected(
             old=snapshot,
             new=new_snapshot,
@@ -150,7 +149,9 @@ def run_patch(
             strategy=strategy,
             annotator=annotator,
         )
-        return PatchResult(snapshot_id=new_snapshot.id, affected=affected)
+        result = PatchResult(snapshot_id=new_snapshot.id, affected=affected)
+        ir.save(store, new_snapshot)
+        return result
     if mode == APPLY_BEST_EFFORT:
         return _run_best_effort(
             store, snapshot, surface_ops, ref_map, strategy, annotator
@@ -175,6 +176,7 @@ def _run_best_effort(
     current = snapshot
     errors: list[SurfaceError] = []
     applied: list[SurfaceOp] = []
+    affected: tuple[AffectedBlock, ...] = ()
     for i, sop in enumerate(surface_ops):
         try:
             entries = degrade((sop,), ref_map, current)
@@ -187,17 +189,14 @@ def _run_best_effort(
                 dataclasses.replace(_wrap_op_error(exc, entries), surface_index=i)
             )
             continue
+        # Build this candidate receipt before committing; failures preserve prior commits.
+        affected = _affected(
+            old=old, new=new_snapshot, surface_ops=tuple(applied) + (sop,),
+            old_ref_map=ref_map, strategy=strategy, annotator=annotator,
+        )
         ir.save(store, new_snapshot)
         current = new_snapshot
         applied.append(sop)
-    affected = _affected(
-        old=old,
-        new=current,
-        surface_ops=tuple(applied),
-        old_ref_map=ref_map,
-        strategy=strategy,
-        annotator=annotator,
-    )
     return PatchResult(
         snapshot_id=current.id, affected=affected, errors=tuple(errors)
     )
@@ -224,31 +223,34 @@ def _plan(
     old_ref_map: ReferenceMap,
     key_cursor: int,
 ) -> list[tuple[str, BlockKey]]:
-    """按 surface op 顺序推导 (status, key) 计划。
+    """按操作顺序归并最终 (status, key)，移动消费旧身份并报告新身份。
 
     新 key 由 apply 前的 ``snapshot.key_cursor`` 推导：批次内第 n 个
     ir.Append（按序，move 贡献一个）取 key ``b{cursor + n}``。
     """
-    plan: list[tuple[str, BlockKey]] = []
+    plan: dict[BlockKey, str] = {}
     cursor = key_cursor
     for sop in surface_ops:
         match sop:
             case SetContent(id=agent_id) | SetAttrs(id=agent_id) | Replace(id=agent_id):
-                plan.append((STATUS_UPDATED, old_ref_map.key_of(agent_id)))
+                key = old_ref_map.key_of(agent_id)
+                plan[key] = STATUS_UPDATED
             case Append():
-                plan.append((STATUS_APPENDED, f"b{cursor}"))
+                plan[f"b{cursor}"] = STATUS_APPENDED
                 cursor += 1
             case Remove(id=agent_id):
-                plan.append((STATUS_REMOVED, old_ref_map.key_of(agent_id)))
+                plan[old_ref_map.key_of(agent_id)] = STATUS_REMOVED
             case Move(id=agent_id):
-                plan.append((STATUS_MOVED, f"b{cursor}"))
+                # A move consumes the old identity; report its replacement only.
+                plan.pop(old_ref_map.key_of(agent_id), None)
+                plan[f"b{cursor}"] = STATUS_MOVED
                 cursor += 1
             case Merge(a=a_id, b=b_id):
-                plan.append((STATUS_MERGED, old_ref_map.key_of(a_id)))
-                plan.append((STATUS_REMOVED, old_ref_map.key_of(b_id)))
+                plan[old_ref_map.key_of(a_id)] = STATUS_MERGED
+                plan[old_ref_map.key_of(b_id)] = STATUS_REMOVED
             case _:
                 raise TypeError(f"not a SurfaceOp: {sop!r}")
-    return plan
+    return [(status, key) for key, status in plan.items()]
 
 
 def _affected(
@@ -269,19 +271,9 @@ def _affected(
     new_index = {b.key: i for i, b in enumerate(new.blocks)}
     old_index = {b.key: i for i, b in enumerate(old.blocks)}
 
-    plan = _plan(surface_ops, old_ref_map, old.key_cursor)
-    # 同一块可能被多条内容 op 命中（如连续 replace）：回执中每块只出现一次，
-    # 位置取首次出现，status 取最后一次
-    order: list[BlockKey] = []
-    final_status: dict[BlockKey, str] = {}
-    for status, key in plan:
-        if key not in final_status:
-            order.append(key)
-        final_status[key] = status
     present_entries: list[tuple[int, AffectedBlock]] = []
     removed_entries: list[tuple[int, AffectedBlock]] = []
-    for key in order:
-        status = final_status[key]
+    for status, key in _plan(surface_ops, old_ref_map, old.key_cursor):
         if status == STATUS_REMOVED:
             removed_entries.append(
                 (

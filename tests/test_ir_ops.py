@@ -6,6 +6,8 @@ from dataclasses import replace
 
 import pytest
 
+from partition import BlockDraft
+
 from ir import (
     ANCHOR_IS_REMOVED,
     BAD_ANCHOR,
@@ -20,6 +22,7 @@ from ir import (
     SetContent,
     apply,
     snapshot_id,
+    snapshot_dumps,
 )
 
 
@@ -49,15 +52,15 @@ class TestEmptyBatch:
 class TestPurityAndAtomicity:
     def test_original_snapshot_unchanged(self):
         s = make_snapshot()
-        before = s  # frozen：任何改动都会破坏相等性
-        apply(s, (SetContent("b1", "改写"), Remove("b3"), Append("新", {}, at="b1")))
-        assert s == before
+        before = snapshot_dumps(s)
+        apply(s, (SetContent("b1", "改写"), Remove("b3"), Append(BlockDraft(content="新", attrs={}), at="b1")))
+        assert snapshot_dumps(s) == before
         assert keys(s) == ["b1", "b2", "b3"]
 
     def test_atomic_failure(self):
         """验收：批次中任一失败 ⇒ 无新快照，s 不变，OpError.index 指向失败条。"""
         s = make_snapshot()
-        ops = (SetContent("b1", "改写"), Remove("不存在"), Append("x", {}, at=HEAD))
+        ops = (SetContent("b1", "改写"), Remove("不存在"), Append(BlockDraft(content="x", attrs={}), at=HEAD))
         with pytest.raises(OpError) as exc_info:
             apply(s, ops)
         err = exc_info.value
@@ -76,7 +79,7 @@ class TestPurityAndAtomicity:
     def test_pure_function_deterministic(self):
         """apply 是纯函数：同一输入试跑两次得到完全相等的新快照（同 id）。"""
         s = make_snapshot()
-        ops = (Append("新", {"k": 1}, at="b2"),)
+        ops = (Append(BlockDraft(content="新", attrs={"k": 1}), at="b2"),)
         assert apply(s, ops) == apply(s, ops)
 
     def test_unknown_op_type(self):
@@ -86,26 +89,32 @@ class TestPurityAndAtomicity:
 
 
 class TestAppend:
+    def test_append_allows_empty_content_after_birth(self):
+        s = make_snapshot()
+        result = apply(s, (Append(BlockDraft("", {}), at=HEAD),))
+        assert result.blocks[0].content == ""
+        assert result.blocks[0].key == "b4"
+
     def test_append_to_head_inserts_front(self):
         s = make_snapshot()
-        s2 = apply(s, (Append("首", {"pos": "front"}, at=HEAD),))
+        s2 = apply(s, (Append(BlockDraft(content="首", attrs={"pos": "front"}), at=HEAD),))
         assert keys(s2) == ["b4", "b1", "b2", "b3"]
         assert s2.blocks[0].content == "首"
         assert s2.blocks[0].attrs == {"pos": "front"}
 
     def test_append_after_middle_key(self):
         s = make_snapshot()
-        s2 = apply(s, (Append("中", {}, at="b1"),))
+        s2 = apply(s, (Append(BlockDraft(content="中", attrs={}), at="b1"),))
         assert keys(s2) == ["b1", "b4", "b2", "b3"]
 
     def test_append_after_last_key_appends_tail(self):
         s = make_snapshot()
-        s2 = apply(s, (Append("尾", {}, at="b3"),))
+        s2 = apply(s, (Append(BlockDraft(content="尾", attrs={}), at="b3"),))
         assert keys(s2) == ["b1", "b2", "b3", "b4"]
 
     def test_append_advances_cursor_and_id(self):
         s = make_snapshot()
-        s2 = apply(s, (Append("x", {}, at=HEAD),))
+        s2 = apply(s, (Append(BlockDraft(content="x", attrs={}), at=HEAD),))
         assert s2.key_cursor == s.key_cursor + 1
         assert s2.id != s.id
         assert s2.id.startswith("s-")
@@ -113,7 +122,7 @@ class TestAppend:
     def test_append_bad_anchor(self):
         s = make_snapshot()
         with pytest.raises(OpError) as exc_info:
-            apply(s, (Append("x", {}, at="b99"),))
+            apply(s, (Append(BlockDraft(content="x", attrs={}), at="b99"),))
         assert exc_info.value.reason == BAD_ANCHOR
         assert exc_info.value.key == "b99"
 
@@ -121,7 +130,7 @@ class TestAppend:
         s = make_snapshot()
         s2 = apply(s, (Remove("b2"),))
         with pytest.raises(OpError) as exc_info:
-            apply(s2, (Append("x", {}, at="b2"),))
+            apply(s2, (Append(BlockDraft(content="x", attrs={}), at="b2"),))
         assert exc_info.value.reason == ANCHOR_IS_REMOVED
         assert exc_info.value.key == "b2"
 
@@ -129,7 +138,7 @@ class TestAppend:
         """块坯的 attrs 被拷贝：事后修改入参不影响快照。"""
         s = make_snapshot()
         attrs = {"k": 1}
-        s2 = apply(s, (Append("x", attrs, at=HEAD),))
+        s2 = apply(s, (Append(BlockDraft(content="x", attrs=attrs), at=HEAD),))
         attrs["k"] = 999
         assert s2.blocks[0].attrs == {"k": 1}
 
@@ -145,7 +154,7 @@ class TestRemove:
         s = make_snapshot()
         s2 = apply(s, (Remove("b2"),))
         assert s2.key_cursor == s.key_cursor  # 4，不回退
-        s3 = apply(s2, (Append("新", {}, at=HEAD),))
+        s3 = apply(s2, (Append(BlockDraft(content="新", attrs={}), at=HEAD),))
         assert "b2" not in keys(s3)
         assert keys(s3)[0] == "b4"
 
@@ -202,8 +211,8 @@ class TestBatchSemantics:
         s2 = apply(
             s,
             (
-                Append("甲", {}, at="b1"),      # 装订为 b4
-                Append("乙", {}, at="b4"),      # 插在 b4 之后，装订为 b5
+                Append(BlockDraft(content="甲", attrs={}), at="b1"),      # 装订为 b4
+                Append(BlockDraft(content="乙", attrs={}), at="b4"),      # 插在 b4 之后，装订为 b5
                 SetContent("b5", "乙改"),
             ),
         )

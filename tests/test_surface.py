@@ -17,7 +17,7 @@ import json
 import pytest
 import ir
 import sourceio
-from partition import partition_chars
+from partition import BlockDraft, partition_chars
 from surface import (
     PATTERN_NOT_FOUND,
     Append,
@@ -188,7 +188,7 @@ class TestDegrade:
         assert core == [
             ir.SetContent(key="b2", content="X"),
             ir.SetAttrs(key="b3", attrs={"k": 1}),
-            ir.Append(draft_content="Y", draft_attrs={}, at="b1"),
+            ir.Append(BlockDraft(content="Y", attrs={}), at="b1"),
             ir.Remove(key="b4"),
         ]
         # origin 溯源：每条 core op 指回其 surface op 的序号与行号
@@ -198,7 +198,7 @@ class TestDegrade:
     def test_head_anchor_maps_to_ir_head(self) -> None:
         snapshot = _snapshot()
         (op, _), *rest = degrade(parse('append(HEAD, "top")'), _ref_map(snapshot), snapshot)
-        assert op == ir.Append(draft_content="top", draft_attrs={}, at=ir.HEAD)
+        assert op == ir.Append(BlockDraft(content="top", attrs={}), at=ir.HEAD)
         assert rest == []
 
     def test_move_expands_to_remove_plus_append_with_draft(self) -> None:
@@ -207,7 +207,7 @@ class TestDegrade:
         assert [op for op, _ in entries] == [
             ir.Remove(key="b1"),
             # draft 取自 patch 前快照中 b1 的 content / attrs
-            ir.Append(draft_content="aaaa", draft_attrs={"start": 0}, at="b3"),
+            ir.Append(BlockDraft(content="aaaa", attrs={"start": 0}), at="b3"),
         ]
         assert all(o.surface_index == 0 and o.position == (1, 1) for _, o in entries)
 
@@ -312,11 +312,44 @@ class TestDegrade:
         assert [op for op, _ in entries] == [
             ir.SetContent(key="b1", content="XX"),
             ir.Remove(key="b1"),
-            ir.Append(draft_content="XX", draft_attrs={"start": 0}, at="b3"),
+            ir.Append(BlockDraft(content="XX", attrs={"start": 0}), at="b3"),
         ]
 
 
 class TestRunPatch:
+    @pytest.mark.parametrize("mode", ["atomic", "best_effort"])
+    @pytest.mark.parametrize("operation", [
+        'replace(b1, "a", "A")\nmove(b1, b2)',
+        'set_content(b1, "A")\nmove(b1, b2)',
+        'set_attrs(b1, {"x": 1})\nmove(b1, b2)',
+        'set_content(b1, "A")\nremove(b1)',
+        'replace(b2, "b", "B")\nmerge(b1, b2)',
+    ])
+    def test_receipt_tracks_final_identity(self, tmp_path, mode, operation):
+        store, _ = _store(tmp_path)
+        result = run_patch(store, operation, blockkey_as_is, xml_ish, mode=mode)
+        snapshot = ir.load(store, result.snapshot_id)
+        keys = {b.key for b in snapshot.blocks}
+        assert ir.current(store) == result.snapshot_id
+        assert not result.errors
+        assert all(a.key in keys or a.status == "removed" for a in result.affected)
+        if operation.startswith("set_attrs"):
+            assert next(b for b in snapshot.blocks if b.key == "b5").attrs == {"x": 1}
+        if "\nmove(" in operation:
+            assert [(a.key, a.status) for a in result.affected] == [("b5", "moved")]
+
+    @pytest.mark.parametrize("mode", ["atomic", "best_effort"])
+    def test_receipt_render_failure_does_not_commit_candidate(self, tmp_path, mode):
+        store, _ = _store(tmp_path)
+        before = _store_fingerprint(store)
+        def broken_annotation(agent_id, content):
+            if content == "NEW":
+                raise ValueError("render failed")
+            return content
+        with pytest.raises(ValueError, match="render failed"):
+            run_patch(store, 'set_content(b1, "NEW")', blockkey_as_is, broken_annotation, mode=mode)
+        assert _store_fingerprint(store) == before
+
     def test_set_content_success(self, tmp_path) -> None:
         store, old = _store(tmp_path)
         result = run_patch(store, 'set_content(b2, "NEW")', blockkey_as_is, xml_ish)

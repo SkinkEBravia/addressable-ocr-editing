@@ -4,7 +4,7 @@
 
 - apply 是纯函数：批次按序应用、原子——任一 op 失败抛 OpError，
   不产生新快照，原快照不变；空批次返回原快照（同一对象）。
-- 成功时产出一个新快照：新 SnapshotId、推进后的 key_cursor。
+- 非空批次成功时产出结果快照；ID 由状态决定，只有 Append 推进游标。
 - RollBack 不是 Op；其物理实现是 store 的 set_current（见 05 / store.py）。
 """
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 
+from .birth import BlockDraftLike
 from .types import (
     HEAD,
     Attrs,
@@ -31,7 +32,7 @@ BAD_ANCHOR = "BAD_ANCHOR"
 """Append 的锚点既不是 HEAD，也不是当前快照中存在的 key。"""
 
 ANCHOR_IS_REMOVED = "ANCHOR_IS_REMOVED"
-"""Append 的锚点是已被 Remove 作废的 key（按当前分配策略可判定）。"""
+"""缺失锚点符合 bN 且编号小于当前游标时的错误分类，不查询历史。"""
 
 
 # ---------------------------------------------------------------------------
@@ -52,14 +53,13 @@ class Append(Op):
     key 由分配器在 apply 时装订。
     """
 
-    draft_content: str
-    draft_attrs: Attrs
+    draft: BlockDraftLike
     at: BlockKey = HEAD
 
 
 @dataclass(frozen=True)
 class Remove(Op):
-    """移除 key 对应的块；其 key 永久作废，不复用。"""
+    """移除 key 对应的块；不回收编号，恢复旧快照时仍会恢复旧游标。"""
 
     key: BlockKey
 
@@ -108,7 +108,7 @@ _ALLOCATED_KEY = re.compile(r"b(\d+)\Z")
 
 
 def _is_retired_key(key: BlockKey, key_cursor: int) -> bool:
-    """按当前分配策略（b{cursor}）判定 key 是否为已作废的已分配 key。
+    """缺失 key 符合 bN 且编号小于游标时，归为已移除锚点。
 
     注意：分配策略可整体替换，调用方不得解析 key 的内容；此判定是
     分配器自身（ir 内部）为错误分类而做的，属于策略实现的一部分。
@@ -122,7 +122,7 @@ def apply(snapshot: DocumentSnapshot, ops: tuple[Op, ...]) -> DocumentSnapshot:
 
     - ops 为空：返回原快照（同一对象），不产出新 SnapshotId。
     - 任一 op 失败：抛 OpError（index 指向失败条），不产生新快照，原快照不变。
-    - 成功：返回新快照（新 SnapshotId、推进后的 key_cursor）。
+    - 成功：返回结果快照；完整状态相同则 ID 相同，只有 Append 推进游标。
     """
     if not ops:
         return snapshot
@@ -137,7 +137,7 @@ def apply(snapshot: DocumentSnapshot, ops: tuple[Op, ...]) -> DocumentSnapshot:
 
     for index, op in enumerate(ops):
         match op:
-            case Append(draft_content=content, draft_attrs=attrs, at=anchor):
+            case Append(draft=draft, at=anchor):
                 if anchor == HEAD:
                     pos = 0
                 elif anchor in positions:
@@ -153,7 +153,7 @@ def apply(snapshot: DocumentSnapshot, ops: tuple[Op, ...]) -> DocumentSnapshot:
                     id="", blocks=(), doc_attrs={}, key_cursor=cursor
                 )
                 key, cursor = alloc(working)
-                blocks.insert(pos, Block(key=key, content=content, attrs=dict(attrs)))
+                blocks.insert(pos, Block(key=key, content=draft.content, attrs=dict(draft.attrs)))
                 rebuild_positions()
             case Remove(key=key):
                 pos = positions.get(key)

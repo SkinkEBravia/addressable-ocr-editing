@@ -268,7 +268,7 @@ def _apply_swe_edit(store: ir.Store, start: int, end: int, text: str) -> None:
         if i == len(lines) - 1 and end == n and not trailing_nl:
             content = line
         at = anchor if i == 0 else f"b{cursor + i - 1}"
-        ops.append(ir.Append(draft_content=content, draft_attrs={}, at=at))
+        ops.append(ir.Append(partition.BlockDraft(content=content, attrs={}), at=at))
     try:
         new_snapshot = ir.apply(snapshot, tuple(ops))
         ir.save(store, new_snapshot)

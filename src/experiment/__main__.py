@@ -127,8 +127,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: --{required} 必需", file=sys.stderr)
             return 2
 
+    toolset_names = _split_csv(args.toolsets)
+    if not toolset_names:
+        print("error: --toolsets must contain at least one toolset name", file=sys.stderr)
+        return 2
+
     model_config = load_model_config(args.model)
-    toolset_configs = [load_toolset_config(n) for n in _split_csv(args.toolsets) or []]
+    toolset_configs = [load_toolset_config(n) for n in toolset_names]
     instruction = None
     if args.instruction:
         instruction = Path(args.instruction).read_text(encoding="utf-8")

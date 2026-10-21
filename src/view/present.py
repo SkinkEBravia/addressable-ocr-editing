@@ -1,15 +1,16 @@
 """Presenter：DocumentSnapshot -> AgentView。
 
-对应 Docs/Design/06-view.md「接口」节。Presenter 是统一输出接口的消费方：
-纯函数、无副作用、不改动快照。
+对应 Docs/Design/06-view.md「呈现接口」节。Presenter 消费快照，
+不改动快照、不执行文件读写；视图身份由最终视图数据的内容哈希确定。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from uuid import uuid4
+from dataclasses import replace
+from hashlib import sha256
 
-from ir import Block, DocumentSnapshot
+from ir import Block, DocumentSnapshot, canonical_json
 
 from view.types import (
     AgentBlockId,
@@ -18,9 +19,21 @@ from view.types import (
     Annotator,
     ReferenceMap,
     ViewError,
+    View,
 )
 
 __all__ = ["present", "render_blocks", "present_file", "file_header"]
+
+
+def _view_id(view: View) -> str:
+    data = {
+        "snapshot_id": view.snapshot_id,
+        "payload": view.payload,
+        "render_spec": view.render_spec,
+    }
+    if isinstance(view, AgentView):
+        data["reference_map"] = view.reference_map.as_dict()
+    return "v-" + sha256(canonical_json(data).encode("utf-8")).hexdigest()[:16]
 
 
 def file_header(label: str, filename: str) -> str:
@@ -67,18 +80,17 @@ def present(
     strategy: AgentIdStrategy,
     annotator: Annotator,
 ) -> AgentView:
-    """DocumentSnapshot -> AgentView（纯函数，无副作用，不改动快照）。
+    """DocumentSnapshot -> AgentView（只读快照，不执行文件读写）。
 
     - payload = 按序对每个块应用 ``annotator(strategy(block, i), block.content)``
       并拼接；空快照对应空串。
     - reference_map 覆盖快照的全部 blocks，双射（重复 id 抛 ViewError）。
-    - view_id 由 Presenter 分配（uuid4 hex）；同一
-      (snapshot, strategy, annotator) 的 payload 与 ReferenceMap 确定。
+    - view_id 按最终展示、来源、元数据和地址映射计算，同一输入得到相同身份。
     - render_spec 记录 kind 与 strategy / annotator 的名称。
     """
     payload, reference_map = render_blocks(snapshot.blocks, strategy, annotator)
-    return AgentView(
-        view_id=uuid4().hex,
+    view = AgentView(
+        view_id="",
         snapshot_id=snapshot.id,
         payload=payload,
         render_spec={
@@ -88,6 +100,7 @@ def present(
         },
         reference_map=reference_map,
     )
+    return replace(view, view_id=_view_id(view))
 
 
 def present_file(
@@ -100,7 +113,7 @@ def present_file(
 ) -> AgentView:
     """带有文件标识抬头与前缀命名空间 ID 的专用 Presenter。
 
-    payload = file_header(label, filename) + 块标注
+    payload = file_header(label, filename) + 块展示（允许无标注）
 
     - strategy 缺省时沿用原行为：给定 ``prefix`` 走 ``prefixed_blockkey``，
       否则 ``blockkey_as_is``；显式给 ``strategy`` 时优先（``prefix`` 不再生效）。
@@ -113,8 +126,8 @@ def present_file(
         strategy = prefixed_blockkey(prefix) if prefix else blockkey_as_is
     base_view = present(snapshot, strategy, actual_annotator)
     header = file_header(label, filename)
-    return AgentView(
-        view_id=base_view.view_id,
+    view = AgentView(
+        view_id="",
         snapshot_id=base_view.snapshot_id,
         payload=header + base_view.payload,
         render_spec={
@@ -125,3 +138,4 @@ def present_file(
         },
         reference_map=base_view.reference_map,
     )
+    return replace(view, view_id=_view_id(view))

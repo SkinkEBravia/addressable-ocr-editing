@@ -29,7 +29,7 @@ S = birth(s, r)
 
 工程约束：
 
-- `birth` 当前检查拼接等式；完整严格分区入口校验还须拒绝空内容块，已列入[设计清理计划](../../plan/design-cleanup.md#待实现的严格分区入口校验)，本轮不改代码。
+- `birth` 已检查拼接等式并拒绝空内容块；空原文只接受空块序列，见[实施计划](../../plan/design-cleanup.md#严格分区入口校验)。
 - `birth` 保存 `SourceText` 的编码与 BOM；对应的 `source` 元数据键为保留键。
 - 文件读取、分区结果落盘和会话目录管理由各自的调用方负责。
 
@@ -134,6 +134,20 @@ Markdown 专用 partitioner 可将标题层级等结构写入 attrs，配套的 
 - 普通 rewrite 直接从模型响应提取 `SourceText`，不必经过 IR；IR-backed 工具从快照重建输出。
 - 文件入口通过 `sourceio` 获取 `SourceText`；实验入口从数据集获得任务文本。字节往返契约针对文件链路，不能直接外推为所有实验工具的输出保证。
 
+### 已有视图组件配套
+
+下表保留已有工具与实验的视图配套。组件本身的契约见 [06-view.md](06-view.md)；工具名和实验名称用于说明已有装配用途。
+
+| partition | ID 策略 | 标注形式 | 已有用途 |
+|---|---|---|---|
+| 任意 | `blockkey_as_is`，AgentBlockId = BlockKey | `xml_ish` | patch 操作面，07 默认栈 |
+| `partition_lines` | `line_number`，当前块序号从 1 起 | `cat_n` | 行号锚操作面 swe_edit；编辑后不保证仍为正文物理行号 |
+| 任意 | `prefixed_blockkey`，如 `c0:b1` | `xml_ish` | `*_global_seq` 全局作用域操作面，隔离跨 chunk 的块地址 |
+| `partition_lines` | `numkey`，如 `b12` → `12`，已有块编号不随位置重排 | `cat_n` | num-key 锚操作面；neo 实验 2 的 `patch_find_replace`／`find_replace_numkey` 等 |
+| `partition_lines` | 由调用方指定，plain 不展示地址 | `plain` | path 抬头加纯原文视图；neo 实验 1 的 `*_anthropic_style` |
+
+策略读取 attrs 时，应选择与元数据生产方配套的 partition。numkey 另外依赖当前块编号约定；带前缀策略的命名空间由调用方选择。这些依赖不扩大通用快照或 Presenter 的职责。
+
 ### 后续清理重点
 
 当前扩展主要集中在 Agent 工具配置与装配入口。清理时优先检查：
@@ -152,10 +166,10 @@ Markdown 专用 partitioner 可将标题层级等结构写入 attrs，配套的 
 | [01-ingestion.md](01-ingestion.md) | bytes 与 `SourceText` 的保真边界 |
 | [02-partition.md](02-partition.md) | 严格分区、`BlockDraft` 与 attrs |
 | [03-ir-data.md](03-ir-data.md) | 块身份、快照数据结构与逻辑格式 |
-| [04-ir-ops.md](04-ir-ops.md) | 核心状态迁移与复杂语义展开 |
-| [05-ir-io.md](05-ir-io.md) | 快照出生、重建与 Store |
+| [04-ir-ops.md](04-ir-ops.md) | 核心操作、批次状态迁移与错误 |
+| [05-ir-io.md](05-ir-io.md) | 快照出生、重建、存储与当前指针 |
 | [06-view.md](06-view.md) | View、ID 策略、标注与地址映射 |
-| [07-agent-api.md](07-agent-api.md) | SurfaceOps、patch 方言、降解与回执 |
+| [07-agent-api.md](07-agent-api.md) | SurfaceOps、方言、应用模式、回执与入口封装 |
 | [08-llm.md](08-llm.md) | 模型访问与协议适配 |
 | [09-tools.md](09-tools.md) | ToolSet、Session 与 Agent loop |
 | [10-datasets.md](10-datasets.md) | 数据集与评测契约 |

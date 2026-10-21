@@ -45,8 +45,8 @@ class ParseError(Exception):
 def op_to_dict(op: Op) -> dict[str, Any]:
     """core op -> JSON 可序列化字典（SurfaceError.expanded 的序列化形式）。"""
     match op:
-        case Append(draft_content=content, draft_attrs=attrs, at=anchor):
-            return {"op": "append", "at": anchor, "content": content, "attrs": attrs}
+        case Append(draft=draft, at=anchor):
+            return {"op": "append", "at": anchor, "content": draft.content, "attrs": draft.attrs}
         case Remove(key=key):
             return {"op": "remove", "key": key}
         case SetContent(key=key, content=content):

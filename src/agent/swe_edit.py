@@ -25,7 +25,7 @@ import reconstruction
 import sourceio
 import view as view_mod
 from agent.session import Session
-from agent.toolset import DONE, Done, ToolCall, ToolParseError, ToolResult
+from agent.toolset import Done, ToolCall, ToolParseError, ToolResult
 from sourceio import SourceText
 
 __all__ = ["SweEditToolSet", "SWE_EDIT_CLAUSE"]
@@ -152,7 +152,7 @@ class SweEditToolSet:
             if i == len(lines) - 1 and end == n and not trailing_nl:
                 content = line  # 替换到文末且原文末行无换行：保持无换行
             at = anchor if i == 0 else f"b{cursor + i - 1}"
-            ops.append(ir.Append(draft_content=content, draft_attrs={}, at=at))
+            ops.append(ir.Append(partition.BlockDraft(content=content, attrs={}), at=at))
         try:
             new_snapshot = ir.apply(snapshot, tuple(ops))
         except ir.OpError as exc:

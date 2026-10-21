@@ -36,7 +36,7 @@ def make_snapshot(n: int = 3) -> DocumentSnapshot:
 
 
 class TestJsonRoundTrip:
-    """验收：json.loads(json.dumps(snapshot)) == snapshot。"""
+    """验收：snapshot_loads(snapshot_dumps(snapshot)) == snapshot。"""
 
     def test_roundtrip_via_helpers(self):
         s = make_snapshot()

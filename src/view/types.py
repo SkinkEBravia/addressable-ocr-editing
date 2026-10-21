@@ -3,8 +3,8 @@
 对应 Docs/Design/06-view.md「定义」节。
 
 View 是从快照导出的对象，服务于特定目的；AgentView 是其中服务 Agent
-的一种（payload 为插入 ID 标注的还原文本），用子类表示并把 payload 收窄
-为 str，同时携带随 View 一起产出的 ReferenceMap。
+的文本视图，用子类表示并把 payload 收窄为 str，同时携带 ReferenceMap。
+是否显示 ID 由标注形式决定；使用 plain 时，正文展示可与原文相同。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 type AgentBlockId = str
-"""Agent 看到的块 ID。由 AgentIdStrategy 生成，同一快照内必须互不相同。"""
+"""Agent 侧块地址。由 AgentIdStrategy 生成，同一快照内必须互不相同；是否可见由标注形式决定。"""
 
 type ViewId = str
 """View 的身份，由 Presenter 分配。"""
@@ -35,7 +35,7 @@ type AgentIdStrategy = Callable[[Block, int], AgentBlockId]
 """id 策略：(block, index) -> AgentBlockId。允许读取 block.attrs。"""
 
 type Annotator = Callable[[AgentBlockId, str], str]
-"""标注形式：(agent_id, content) -> 带 ID 标注的文本。与 id 策略相互独立。"""
+"""标注形式：(agent_id, content) -> 展示文本。允许原样返回 content，与 id 策略独立。"""
 
 
 class ViewError(Exception):
@@ -107,9 +107,10 @@ class View:
 class AgentView(View):
     """View 的一种，服务 Agent。
 
-    payload 为插入了 ID 标注的还原文本（str）；分块方式与快照一致，
-    但使用另一套 ID——AgentBlockId。reference_map 随 View 一起产出，
-    覆盖快照的全部 blocks。
+    payload 是按快照块顺序生成的展示文本（str），可以不带 ID 标注。
+    使用 plain 且不加抬头时，payload 与当前正文相同，可用于 rewrite。
+    reference_map 随 View 一起产出，覆盖快照的全部 blocks；展示无标注
+    不代表不存在映射，也不要求 Agent 在 rewrite 中使用该映射。
     """
 
     payload: str

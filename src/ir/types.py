@@ -1,7 +1,7 @@
 """IR 数据结构：Block、DocumentSnapshot、分配器与快照的 JSON 逻辑格式。
 
-对应 Docs/Design/03-ir-data.md。快照不可变（frozen dataclass），
-`blocks` 为有序 tuple，按 `BlockKey` 寻址。
+对应 Docs/Design/03-ir-data.md。快照按只读契约使用，frozen dataclass 和
+有序 blocks tuple 不冻结 attrs 内部的 dict／list；按 BlockKey 寻址。
 
 解耦约定：JSON 值约束与 partition 模块一致，但按模块边界要求在 ir 内
 自行定义 `JsonValue` / `Attrs`，不 import 其他模块的内部类型。
@@ -22,13 +22,13 @@ type Attrs = dict[str, JsonValue]
 """全系统元数据的统一载体。IR 只保管、不解读。"""
 
 type BlockKey = str
-"""Block 的身份。不透明字符串；同一文档内唯一、一经分配不复用。"""
+"""Block 的身份。不透明字符串；同一快照内唯一，不提供跨分支的全局身份。"""
 
 HEAD: BlockKey = "head"
 """保留值：序列起点的地址（虚 Block 的 BlockKey），永远不作为真实 Block 的 key。"""
 
 type SnapshotId = str
-"""快照的身份。每次迁移产出的新快照持有新 SnapshotId。"""
+"""完整快照状态的内容标识；一次编辑不一定改变 SnapshotId。"""
 
 SPEC = 1
 """快照持久化格式版本号。写入方总写当前版本。"""
@@ -45,7 +45,7 @@ class Block:
 
 @dataclass(frozen=True)
 class DocumentSnapshot:
-    """文档层的状态。不可变、不持有历史、不认识会话。"""
+    """文档层的只读状态；不持有历史或会话，元数据不具备深层不可变隔离。"""
 
     id: SnapshotId
     blocks: tuple[Block, ...]
@@ -56,8 +56,8 @@ class DocumentSnapshot:
 def alloc(snapshot: DocumentSnapshot) -> tuple[BlockKey, int]:
     """分配器：取号 = f"b{key_cursor}"，返回 (新 key, 新 cursor)。
 
-    取号时机：快照出生（为每个块坯装订 key）与 Append。
-    游标随快照持久化、随迁移演进——会话中断恢复后不会重号。
+    Append 调用此函数；birth 按相同 bN 规则直接为初始块编号。
+    连续向前编辑不回收编号；恢复旧快照也恢复游标，可与其他分支重号。
     """
     return f"b{snapshot.key_cursor}", snapshot.key_cursor + 1
 
@@ -79,9 +79,9 @@ def content_id(payload: Any, prefix: str) -> str:
 
 
 def snapshot_to_dict(snapshot: DocumentSnapshot) -> dict[str, Any]:
-    """快照的逻辑 JSON 格式（03 文档「持久化格式」节，spec 1）。
+    """快照的逻辑 JSON 格式（03 文档「序列化」节，spec 1）。
 
-    全体成员为 str / int / JsonValue 组合，直接 json.dumps / json.loads 往返。
+    返回普通 JSON 数据结构，可交给 json.dumps／json.loads；attrs 引用仍共享。
     """
     return {
         "spec": SPEC,
@@ -96,7 +96,10 @@ def snapshot_to_dict(snapshot: DocumentSnapshot) -> dict[str, Any]:
 
 
 def snapshot_from_dict(data: dict[str, Any]) -> DocumentSnapshot:
-    """从逻辑 JSON 格式还原快照。spec 不兼容或数据非法时抛 ValueError。"""
+    """还原快照；版本不兼容、重复 key 或真实块使用 HEAD 时抛 ValueError。
+
+    不执行完整 schema／游标／哈希检查；缺字段等结构错误可抛 KeyError。
+    """
     spec = data.get("spec")
     if spec != SPEC:
         raise ValueError(f"unsupported snapshot spec: {spec!r}")

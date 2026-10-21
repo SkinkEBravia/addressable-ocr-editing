@@ -6,7 +6,7 @@
 
     <session>/
       blobs/<hash>.json            # {"content": str, "attrs": Attrs}
-                                   # hash = sha256(规范化 JSON)，blob 无 key
+                                   # hash = SHA-256 前 16 位十六进制，blob 无 key
       snapshots/<SnapshotId>.json  # 清单：逻辑格式中块的 content/attrs 换为 ref
       current                      # 纯文本，内容为当前 SnapshotId
 
@@ -23,7 +23,6 @@ from typing import Any
 
 from .types import (
     SPEC,
-    Attrs,
     Block,
     DocumentSnapshot,
     SnapshotId,
@@ -85,12 +84,12 @@ def _write_json_atomic(path: Path, payload: Any) -> None:
 
 
 def _blob_payload(block: Block) -> dict[str, Any]:
-    """blob 无 key：内容相同的块即使 key 不同也只存一份。"""
+    """blob 无 key：content 与 attrs 均相同的块共享载荷，即使 key 不同。"""
     return {"content": block.content, "attrs": block.attrs}
 
 
 def _blob_ref(block: Block) -> str:
-    """blob 名 = sha256(规范化 JSON) 全量十六进制。"""
+    """blob 名为规范化载荷 SHA-256 的前 16 位十六进制字符。"""
     return content_id(_blob_payload(block), "")
 
 
